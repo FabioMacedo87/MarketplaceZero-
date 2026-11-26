@@ -26,7 +26,6 @@ export function analyzeAndModernizeScript(filename: string, rawContent: string):
   const isPowerShell = cleanName.toLowerCase().endsWith('.ps1');
   const rawLines = content.split(/\r?\n/);
   const activeLines = rawLines.filter((line) => !isCommentLine(line));
-  const activeText = activeLines.join('\n');
   const findings: ScriptFinding[] = [];
 
   const add = (
@@ -37,21 +36,17 @@ export function analyzeAndModernizeScript(filename: string, rawContent: string):
     description: string,
     remediation: string,
   ) => {
-    if (expression.test(activeText)) {
+    const index = activeLines.findIndex((line) => expression.test(line));
+    if (index >= 0) {
       findings.push({
         id,
         severity,
-        lineRef: lineOf(activeLines, expression),
+        lineRef: 'Linha ' + String(index + 1),
         title,
         description,
         remediation,
       });
     }
-  };
-
-  const lineOf = (lines: string[], expression: RegExp): string => {
-    const index = lines.findIndex((line) => expression.test(line));
-    return index < 0 ? 'Global' : 'Linha ' + String(index + 1);
   };
 
   if (/^\s*$/.test(content)) {
@@ -75,7 +70,7 @@ export function analyzeAndModernizeScript(filename: string, rawContent: string):
     add(
       'blocking-pause',
       FindingSeverity.ATENCAO,
-      /^\s*pause\b|^\s*Read-Host\b/i,
+      /\bpause\b|\bRead-Host\b/i,
       'Pausa interativa',
       'O comando pode bloquear a execução à espera de interação humana, dificultando tarefas agendadas ou pipelines.',
       'Torne a interação opcional e disponibilize um modo não interativo explícito.',
