@@ -36,6 +36,31 @@ const planConfiguration = {
 
 type PlanKey = keyof typeof planConfiguration;
 
+const FREE_ANALYSIS_LIMIT = 5;
+const PAID_ANALYSIS_LIMITS: Record<PlanKey, number> = {
+  essencial: 50,
+  profissional: 250,
+  empresarial: 1000,
+};
+
+type SubscriptionRecord = {
+  plan_key: string;
+  status: string;
+  current_period_end: string | null;
+};
+
+function resolveActivePlan(subscription: SubscriptionRecord | null): PlanKey | null {
+  if (!subscription || !['active', 'trialing'].includes(subscription.status)) return null;
+  if (subscription.current_period_end && Date.parse(subscription.current_period_end) <= Date.now()) return null;
+  if (!(subscription.plan_key in planConfiguration)) return null;
+  return subscription.plan_key as PlanKey;
+}
+
+function currentUtcMonthStart(): string {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+}
+
 function billingConfigurationReady(): boolean {
   return Boolean(
     process.env.PUBLICAFIX_LIVE_BILLING_ENABLED === 'true' &&
@@ -267,7 +292,17 @@ app.get('/api/initial-script', (_req, res) => {
   res.json({ filename, content, stored: false, executed: false });
 });
 
-app.post('/api/audit-script', (req, res) => {
+app.post('/api/audit-script', async (req, res) => {
+  const user = await authenticatedUser(req);
+  if (!user) {
+    sendApiError(res, 401, 'Inicia sessão para utilizar as análises do PublicaFix.');
+    return;
+  }
+  if (!admin) {
+    sendApiError(res, 503, 'A ligação à base de dados ainda não está configurada.');
+    return;
+  }
+
   const body = req.body ?? {};
   const { filename, content } = body;
 
@@ -287,8 +322,62 @@ app.post('/api/audit-script', (req, res) => {
     return;
   }
 
+  const { data: subscription, error: subscriptionError } = await admin
+    .from('subscriptions')
+    .select('plan_key,status,current_period_end')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (subscriptionError) {
+    sendApiError(res, 500, 'Não foi possível consultar o plano desta conta.');
+    return;
+  }
+
+  const activePlan = resolveActivePlan(subscription as SubscriptionRecord | null);
+  const planKey = activePlan || 'gratuito';
+  const limit = activePlan ? PAID_ANALYSIS_LIMITS[activePlan] : FREE_ANALYSIS_LIMIT;
   const audit = analyzeAndModernizeScript(safeFilename, content);
-  res.json({ audit, engine: 'publicafix-static-rules-v1', stored: false, executed: false });
+
+  const { data: quotaRows, error: quotaError } = await admin.rpc('consume_analysis_quota', {
+    p_user_id: user.id,
+    p_limit: limit,
+  });
+
+  if (quotaError) {
+    console.error('PublicaFix analysis quota failed:', quotaError.message);
+    sendApiError(res, 503, 'Não foi possível validar o limite mensal de análises. Tenta novamente.');
+    return;
+  }
+
+  const quota = Array.isArray(quotaRows) ? quotaRows[0] : quotaRows;
+  if (!quota || quota.allowed !== true) {
+    res.status(429).json({
+      error: 'Atingiste o limite mensal do plano atual. Podes voltar a analisar scripts no próximo mês ou escolher outro plano.',
+      usage: {
+        plan: planKey,
+        used: Number(quota?.used_count ?? limit),
+        limit,
+        remaining: 0,
+        monthStart: quota?.month_start || currentUtcMonthStart(),
+      },
+    });
+    return;
+  }
+
+  const used = Number(quota.used_count);
+  res.json({
+    audit,
+    engine: 'publicafix-static-rules-v1',
+    stored: false,
+    executed: false,
+    usage: {
+      plan: planKey,
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      monthStart: quota.month_start || currentUtcMonthStart(),
+    },
+  });
 });
 
 app.get('/api/billing-status', async (req, res) => {
@@ -302,17 +391,45 @@ app.get('/api/billing-status', async (req, res) => {
     return;
   }
 
-  const { data, error } = await admin
+  const { data: subscription, error: subscriptionError } = await admin
     .from('subscriptions')
     .select('plan_key,status,current_period_end,cancel_at_period_end')
     .eq('user_id', user.id)
     .maybeSingle();
 
-  if (error) {
+  if (subscriptionError) {
     sendApiError(res, 500, 'Não foi possível consultar o estado da subscrição.');
     return;
   }
-  res.json({ subscription: data || null });
+
+  const activePlan = resolveActivePlan(subscription as SubscriptionRecord | null);
+  const planKey = activePlan || 'gratuito';
+  const limit = activePlan ? PAID_ANALYSIS_LIMITS[activePlan] : FREE_ANALYSIS_LIMIT;
+  const monthStart = currentUtcMonthStart();
+
+  const { data: usageRow, error: usageError } = await admin
+    .from('analysis_usage_monthly')
+    .select('used_count')
+    .eq('user_id', user.id)
+    .eq('month_start', monthStart)
+    .maybeSingle();
+
+  if (usageError) {
+    sendApiError(res, 500, 'Não foi possível consultar a utilização mensal.');
+    return;
+  }
+
+  const used = Number(usageRow?.used_count ?? 0);
+  res.json({
+    subscription: subscription || null,
+    usage: {
+      plan: planKey,
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      monthStart,
+    },
+  });
 });
 
 app.post('/api/create-checkout-session', async (req, res) => {
