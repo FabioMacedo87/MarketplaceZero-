@@ -13,6 +13,7 @@ alter table public.analysis_usage_monthly enable row level security;
 revoke all on table public.analysis_usage_monthly from public, anon, authenticated;
 grant select, insert, update on table public.analysis_usage_monthly to service_role;
 
+drop policy if exists "Service role manages monthly analysis quota" on public.analysis_usage_monthly;
 create policy "Service role manages monthly analysis quota"
 on public.analysis_usage_monthly
 for all
