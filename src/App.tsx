@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AccountSection } from './components/AccountSection.tsx';
 import { CapabilitiesSection } from './components/CapabilitiesSection.tsx';
 import { Footer } from './components/Footer.tsx';
 import { HeroSection } from './components/HeroSection.tsx';
@@ -6,10 +7,15 @@ import { PricingSection } from './components/PricingSection.tsx';
 import { ScriptModernizer } from './components/ScriptModernizer.tsx';
 import { TopBar } from './components/TopBar.tsx';
 import { ORIGINAL_ATTACHED_CMD } from './utils/scriptAudit.ts';
+import { supabase } from './lib/supabase.ts';
+
+type PlanKey = 'essencial' | 'profissional' | 'empresarial';
 
 export default function App() {
   const [scriptName, setScriptName] = useState('INICIAR-CORRECAO.cmd');
   const [scriptContent, setScriptContent] = useState(ORIGINAL_ATTACHED_CMD);
+  const [billingReady, setBillingReady] = useState(false);
+  const [checkoutMessage, setCheckoutMessage] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -23,6 +29,16 @@ export default function App() {
       .catch(() => {
         // O exemplo incorporado mantém a análise disponível se o servidor não responder.
       });
+
+    fetch('/api/public-config', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (active && data) setBillingReady(data.billingReady === true);
+      })
+      .catch(() => {
+        if (active) setBillingReady(false);
+      });
+
     return () => {
       active = false;
     };
@@ -32,6 +48,41 @@ export default function App() {
     document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
+  const beginCheckout = async (planKey: PlanKey) => {
+    setCheckoutMessage('');
+    if (!supabase) {
+      navigateTo('conta');
+      setCheckoutMessage('A área pessoal ainda precisa de configuração.');
+      return;
+    }
+
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session) {
+      navigateTo('conta');
+      setCheckoutMessage('Inicia sessão na tua conta antes de escolher uma subscrição.');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + data.session.access_token,
+        },
+        body: JSON.stringify({ planKey }),
+      });
+      const result = await response.json();
+      if (!response.ok || typeof result.url !== 'string') {
+        throw new Error(result.error || 'Não foi possível iniciar a subscrição.');
+      }
+      window.location.assign(result.url);
+    } catch (error) {
+      setCheckoutMessage(error instanceof Error ? error.message : 'Não foi possível iniciar a subscrição.');
+      navigateTo('conta');
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#FAFAFA] text-[#0F172A]">
       <TopBar onNavigateSection={navigateTo} />
@@ -39,7 +90,13 @@ export default function App() {
         <HeroSection onJumpToModernizer={() => navigateTo('modernizador')} />
         <CapabilitiesSection />
         <ScriptModernizer initialFilename={scriptName} initialContent={scriptContent} />
-        <PricingSection />
+        <AccountSection billingReady={billingReady} />
+        <PricingSection billingReady={billingReady} onSubscribe={beginCheckout} />
+        {checkoutMessage && (
+          <div role="status" className="max-w-[1200px] mx-auto px-6 py-4 text-sm text-slate-700">
+            {checkoutMessage}
+          </div>
+        )}
       </main>
       <Footer onNavigateSection={navigateTo} />
     </div>
