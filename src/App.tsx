@@ -14,7 +14,8 @@ type PlanKey = 'essencial' | 'profissional' | 'empresarial';
 export default function App() {
   const [scriptName, setScriptName] = useState('INICIAR-CORRECAO.cmd');
   const [scriptContent, setScriptContent] = useState(ORIGINAL_ATTACHED_CMD);
-  const [billingReady, setBillingReady] = useState(false);\n  const [planPrices, setPlanPrices] = useState<Partial<Record<PlanKey, number>>>({});
+  const [billingReady, setBillingReady] = useState(false);
+  const [planPrices, setPlanPrices] = useState<Partial<Record<PlanKey, number>>>({});
   const [checkoutMessage, setCheckoutMessage] = useState('');
 
   useEffect(() => {
@@ -33,7 +34,10 @@ export default function App() {
     fetch('/api/public-config', { cache: 'no-store' })
       .then((response) => response.ok ? response.json() : null)
       .then((data) => {
-        if (active && data) {\n          setBillingReady(data.billingReady === true);\n          setPlanPrices(data.prices && typeof data.prices === 'object' ? data.prices : {});\n        }
+        if (active && data) {
+          setBillingReady(data.billingReady === true);
+          setPlanPrices(data.prices && typeof data.prices === 'object' ? data.prices : {});
+        }
       })
       .catch(() => {
         if (active) { setBillingReady(false); setPlanPrices({}); }
