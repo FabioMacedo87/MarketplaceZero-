@@ -9,8 +9,8 @@ export const Footer: React.FC<FooterProps> = ({ onNavigateSection }) => (
     <div className="max-w-[1200px] mx-auto px-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
       <div>
         <p className="font-display text-base font-bold text-[#0F172A]">PublicaFix</p>
-        <p className="text-xs text-slate-500 mt-1">Beta de análise estática de scripts · 2026</p>
-        <p className="text-xs text-slate-500 mt-1">Sem execução remota, conta de cliente ou cobrança nesta versão.</p>
+        <p className="text-xs text-slate-500 mt-1">Análise estática de scripts · 2026</p>
+        <p className="text-xs text-slate-500 mt-1">Não executa nem publica scripts. A cobrança depende da ativação dos planos.</p>
       </div>
       <div className="flex flex-wrap items-center gap-6 text-xs font-medium text-slate-600">
         <button type="button" onClick={() => onNavigateSection('capacidades')} className="hover:text-[#0F172A]">O que faz</button>
