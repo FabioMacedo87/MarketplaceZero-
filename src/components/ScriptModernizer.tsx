@@ -1,22 +1,33 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Copy, Download, FileCode2, FileUp, Play } from 'lucide-react';
 import { FindingSeverity, type ScriptAuditResult } from '../types.ts';
-import { ORIGINAL_ATTACHED_CMD, analyzeAndModernizeScript } from '../utils/scriptAudit.ts';
+import { ORIGINAL_ATTACHED_CMD } from '../utils/scriptAudit.ts';
+import { supabase } from '../lib/supabase.ts';
 
 interface ScriptModernizerProps {
   initialFilename?: string;
   initialContent?: string;
+  onRequireAuth: () => void;
 }
 
 const MAX_FILE_BYTES = 32 * 1024;
 
+const emptyAudit = (filename: string): ScriptAuditResult => ({
+  filename,
+  detectedType: filename.toLowerCase().endsWith('.ps1') ? 'powershell' : 'batch',
+  checksPassed: 0,
+  totalChecks: 9,
+  findings: [],
+});
+
 export const ScriptModernizer: React.FC<ScriptModernizerProps> = ({
   initialFilename = 'INICIAR-CORRECAO.cmd',
   initialContent = ORIGINAL_ATTACHED_CMD,
+  onRequireAuth,
 }) => {
   const [filename, setFilename] = useState(initialFilename);
   const [sourceCode, setSourceCode] = useState(initialContent);
-  const [audit, setAudit] = useState<ScriptAuditResult>(() => analyzeAndModernizeScript(initialFilename, initialContent));
+  const [audit, setAudit] = useState<ScriptAuditResult>(() => emptyAudit(initialFilename));
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [message, setMessage] = useState('');
@@ -24,7 +35,7 @@ export const ScriptModernizer: React.FC<ScriptModernizerProps> = ({
   useEffect(() => {
     setFilename(initialFilename);
     setSourceCode(initialContent);
-    setAudit(analyzeAndModernizeScript(initialFilename, initialContent));
+    setAudit(emptyAudit(initialFilename));
   }, [initialFilename, initialContent]);
 
   const runAnalysis = async (nextFilename = filename, nextContent = sourceCode) => {
@@ -40,19 +51,47 @@ export const ScriptModernizer: React.FC<ScriptModernizerProps> = ({
     setIsAnalyzing(true);
     setMessage('');
     try {
+      if (!supabase) {
+        setMessage('A autenticação ainda não está disponível. Inicia sessão para analisar scripts.');
+        onRequireAuth();
+        return;
+      }
+
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (sessionError || !accessToken) {
+        setMessage('Inicia sessão ou cria uma conta gratuita para utilizar as análises.');
+        onRequireAuth();
+        return;
+      }
+
       const response = await fetch('/api/audit-script', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + accessToken,
+        },
         body: JSON.stringify({ filename: nextFilename, content: nextContent }),
       });
-      if (!response.ok) throw new Error('O serviço remoto não respondeu; foi usada a análise local.');
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 401) {
+          setMessage('A tua sessão expirou. Inicia sessão novamente para continuar.');
+          onRequireAuth();
+          return;
+        }
+        throw new Error(typeof data.error === 'string' ? data.error : 'Não foi possível concluir a análise.');
+      }
       if (!data.audit) throw new Error('Resposta de análise inválida.');
       setAudit(data.audit as ScriptAuditResult);
-      setMessage('Análise concluída. O conteúdo não foi guardado nem executado.');
-    } catch {
-      setAudit(analyzeAndModernizeScript(nextFilename, nextContent));
-      setMessage('Análise local concluída. Não foi possível confirmar a resposta do servidor; o PublicaFix não executou o ficheiro.');
+      const usage = data.usage;
+      setMessage(
+        usage && typeof usage.used === 'number' && typeof usage.limit === 'number'
+          ? 'Análise concluída. Utilizações este mês: ' + usage.used + ' de ' + usage.limit + '. O conteúdo não foi guardado nem executado.'
+          : 'Análise concluída. O conteúdo não foi guardado nem executado.',
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível concluir a análise.');
     } finally {
       setIsAnalyzing(false);
     }
