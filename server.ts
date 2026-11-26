@@ -1,22 +1,10 @@
-import crypto from 'crypto';
 import express from 'express';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import Stripe from 'stripe';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import {
-  CREDIT_PACKS,
-  INITIAL_ACCOUNTS,
-  INITIAL_LEDGER,
-  INITIAL_VOUCHERS,
-} from './src/data/creditCatalog.ts';
-import {
-  LedgerEntryType,
-  VoucherStatus,
-  type CreditAccount,
-  type CreditVoucher,
-  type LedgerEntry,
-} from './src/types.ts';
+import { WebSocketServer, WebSocket } from 'ws';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,486 +12,166 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-let accountsStore: CreditAccount[] = INITIAL_ACCOUNTS.map((a) => ({ ...a }));
-let vouchersStore: CreditVoucher[] = INITIAL_VOUCHERS.map((v) => ({ ...v }));
-let ledgerStore: LedgerEntry[] = INITIAL_LEDGER.map((l) => ({ ...l }));
-const processedStripeSessions = new Set<string>();
+app.use(express.json({ limit: '32kb' }));
 
-function nowStamp(): string {
-  const d = new Date();
-  return `${d.toISOString().slice(0, 10)} ${d.toTimeString().slice(0, 5)}`;
+interface LeaderboardEntry {
+  id: string;
+  playerName: string;
+  character: 'Lucía' | 'Jason';
+  cash: number;
+  missionsCompleted: number;
+  maxStars: number;
+  platform: 'desktop' | 'mobile';
+  createdAt: string;
 }
 
-function getStripeClient(): Stripe | null {
-  const key = process.env.STRIPE_SECRET_KEY?.trim();
-  if (!key) return null;
-  return new Stripe(key);
+type CharacterId = 'lucia' | 'jason';
+type VehicleType = 'coupe' | 'muscle' | 'buggy' | 'police' | 'taxi';
+type WeaponId = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'rpg';
+type ProfessionId = 'psp' | 'taxi' | 'courier' | 'merchant' | 'paramedic';
+
+interface ServerPlayer {
+  id: string;
+  roomId: string;
+  name: string;
+  character: CharacterId;
+  profession: ProfessionId;
+  onDuty: boolean;
+  drivingPoints: number;
+  sirenActive: boolean;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  angle: number;
+  speed: number;
+  vehicleType: VehicleType | null;
+  vehicleColor: string;
+  weaponId: WeaponId;
+  hp: number;
+  wantedStars: number;
+  updatedAt: number;
 }
 
-function resolveAppOrigin(req: express.Request): string {
-  const envUrl = process.env.APP_URL?.trim();
-  if (envUrl && /^https?:\/\//i.test(envUrl) && !envUrl.includes('MY_APP_URL')) {
-    return envUrl.replace(/\/+$/, '');
-  }
-  const proto = req.headers['x-forwarded-proto'] === 'https' ? 'https' : req.protocol || 'http';
-  const host = req.get('x-forwarded-host') || req.get('host') || `localhost:${PORT}`;
-  return `${proto}://${host}`;
+const VALID_WEAPONS = new Set<WeaponId>(['pistol', 'smg', 'shotgun', 'rifle', 'rpg']);
+const VALID_VEHICLES = new Set<VehicleType>(['coupe', 'muscle', 'buggy', 'police', 'taxi']);
+const VALID_PROFESSIONS = new Set<ProfessionId>(['psp', 'taxi', 'courier', 'merchant', 'paramedic']);
+
+function clampNum(v: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
 }
 
-function applyCreditDelta(
-  accountId: string,
-  delta: number,
-  type: LedgerEntryType,
-  reference: string,
-): { account: CreditAccount; entry: LedgerEntry } {
-  const idx = accountsStore.findIndex((a) => a.id === accountId);
-  if (idx === -1) {
-    throw new Error('Conta de destino não encontrada.');
-  }
-
-  const current = accountsStore[idx];
-  const balanceBefore = current.balance;
-  const balanceAfter = balanceBefore + delta;
-
-  if (balanceAfter < 0) {
-    throw new Error(
-      `Saldo insuficiente (${balanceBefore} créditos disponíveis, necessários ${Math.abs(delta)}).`,
-    );
-  }
-
-  const stamp = nowStamp();
-  const updated: CreditAccount = {
-    ...current,
-    balance: balanceAfter,
-    totalIssued: delta > 0 ? current.totalIssued + delta : current.totalIssued,
-    totalConsumed: delta < 0 ? current.totalConsumed + Math.abs(delta) : current.totalConsumed,
-    updatedAt: stamp,
-  };
-
-  accountsStore[idx] = updated;
-
-  const entry: LedgerEntry = {
-    id: `led-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
-    accountId: updated.id,
-    accountName: updated.name,
-    type,
-    delta,
-    balanceBefore,
-    balanceAfter,
-    reference: reference.slice(0, 120),
-    createdAt: stamp,
-  };
-
-  ledgerStore = [entry, ...ledgerStore];
-  return { account: updated, entry };
+function sanitizeRoomId(raw: unknown): string {
+  if (typeof raw !== 'string') return 'porto-ribeira';
+  const cleaned = raw.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
+  return cleaned.length >= 2 ? cleaned : 'porto-ribeira';
 }
 
-// Stripe Webhook must receive raw body before express.json()
-app.post(
-  '/api/stripe/webhook',
-  express.raw({ type: 'application/json' }),
-  (req, res) => {
-    const stripe = getStripeClient();
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
-    if (!stripe || !webhookSecret) {
-      res.status(503).json({ error: 'Stripe webhook não configurado no servidor.' });
-      return;
-    }
+function sanitizeName(raw: unknown): string {
+  if (typeof raw !== 'string') return 'Piloto';
+  const cleaned = raw.replace(/[<>]/g, '').trim().slice(0, 20);
+  return cleaned.length >= 2 ? cleaned : 'Piloto';
+}
 
-    const sig = req.headers['stripe-signature'];
-    if (typeof sig !== 'string') {
-      res.status(400).json({ error: 'Assinatura Stripe em falta.' });
-      return;
-    }
+function sanitizeColor(raw: unknown): string {
+  if (typeof raw === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw)) return raw;
+  return '#F43F5E';
+}
 
-    let event: Stripe.Event;
-    try {
-      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-    } catch {
-      res.status(400).json({ error: 'Assinatura Stripe inválida.' });
-      return;
-    }
-
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object as Stripe.Checkout.Session;
-      if (processedStripeSessions.has(session.id)) {
-        res.json({ received: true, duplicate: true });
-        return;
-      }
-
-      const accountId = session.metadata?.accountId;
-      const packId = session.metadata?.packId;
-      const pack = CREDIT_PACKS.find((p) => p.id === packId);
-
-      if (accountId && pack && session.payment_status === 'paid') {
-        try {
-          applyCreditDelta(
-            accountId,
-            pack.credits,
-            pack.kind === 'subscription'
-              ? LedgerEntryType.SUBSCRICAO_MENSAL
-              : LedgerEntryType.COMPRA_STRIPE,
-            `${pack.name} · Stripe ${session.id.slice(-8)}`,
-          );
-          processedStripeSessions.add(session.id);
-        } catch {
-          // Account not found in memory store
-        }
-      }
-    }
-
-    res.json({ received: true });
+let leaderboardStore: LeaderboardEntry[] = [
+  {
+    id: 'lb-1',
+    playerName: 'Lucía V.',
+    character: 'Lucía',
+    cash: 6450,
+    missionsCompleted: 7,
+    maxStars: 5,
+    platform: 'desktop',
+    createdAt: '2026-11-26',
   },
-);
+  {
+    id: 'lb-2',
+    playerName: 'Jason M.',
+    character: 'Jason',
+    cash: 4820,
+    missionsCompleted: 5,
+    maxStars: 4,
+    platform: 'mobile',
+    createdAt: '2026-11-25',
+  },
+  {
+    id: 'lb-3',
+    playerName: 'Diogo R.',
+    character: 'Lucía',
+    cash: 3190,
+    missionsCompleted: 4,
+    maxStars: 3,
+    platform: 'mobile',
+    createdAt: '2026-11-24',
+  },
+];
 
-app.use(express.json({ limit: '64kb' }));
+// Authoritative Live Multiplayer Rooms
+const rooms = new Map<string, Map<string, { player: ServerPlayer; ws: WebSocket }>>();
+
+function getRoom(roomId: string) {
+  let room = rooms.get(roomId);
+  if (!room) {
+    room = new Map();
+    rooms.set(roomId, room);
+  }
+  return room;
+}
+
+function broadcastRoom(roomId: string, payload: unknown, excludeId?: string) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const serialized = JSON.stringify(payload);
+  for (const [pid, client] of room.entries()) {
+    if (pid === excludeId) continue;
+    if (client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(serialized);
+    }
+  }
+}
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'CreditoHub' });
+  let totalOnline = 0;
+  for (const r of rooms.values()) totalOnline += r.size;
+  res.json({ ok: true, service: 'PortoRush', onlinePlayers: totalOnline });
 });
 
-app.get('/api/credits/repository', (_req, res) => {
-  res.json({
-    accounts: accountsStore,
-    vouchers: vouchersStore,
-    ledger: ledgerStore,
-    packs: CREDIT_PACKS,
-    stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY?.trim()),
-  });
+app.get('/api/game/leaderboard', (_req, res) => {
+  res.json({ entries: leaderboardStore.slice(0, 10) });
 });
 
-app.post('/api/credits/accounts', (req, res) => {
-  const { name, email, planName } = req.body ?? {};
-  if (typeof name !== 'string' || name.trim().length < 2) {
-    res.status(400).json({ error: 'Indique o nome da conta ou equipa (mínimo 2 caracteres).' });
-    return;
-  }
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (typeof email !== 'string' || !emailRegex.test(email.trim())) {
-    res.status(400).json({ error: 'Indique um endereço de email válido.' });
-    return;
-  }
+app.post('/api/game/leaderboard', (req, res) => {
+  const { playerName, character, cash, missionsCompleted, maxStars, platform } = req.body ?? {};
+  const cleanName = sanitizeName(playerName) || 'Piloto do Porto';
+  const cleanChar = character === 'Jason' ? 'Jason' : 'Lucía';
+  const cleanCash = Math.round(clampNum(cash, 0, 9_999_999, 0));
+  const cleanMissions = Math.round(clampNum(missionsCompleted, 0, 999, 0));
+  const cleanStars = Math.round(clampNum(maxStars, 0, 5, 0));
+  const cleanPlatform = platform === 'mobile' ? 'mobile' : 'desktop';
 
-  const newAccount: CreditAccount = {
-    id: `acc-${crypto.randomBytes(3).toString('hex')}`,
-    name: name.trim().slice(0, 80),
-    email: email.trim().slice(0, 100),
-    planName:
-      typeof planName === 'string' && planName.trim().length > 0
-        ? planName.trim().slice(0, 40)
-        : 'Conta Personalizada',
-    balance: 0,
-    totalIssued: 0,
-    totalConsumed: 0,
-    updatedAt: nowStamp(),
-  };
-
-  accountsStore = [newAccount, ...accountsStore];
-  res.status(201).json({ account: newAccount, accounts: accountsStore });
-});
-
-app.post('/api/credits/issue', (req, res) => {
-  const { accountId, amount, reference } = req.body ?? {};
-  const parsedAmount = Number(amount);
-
-  if (typeof accountId !== 'string' || !accountId.trim()) {
-    res.status(400).json({ error: 'Selecione uma conta de destino.' });
-    return;
-  }
-  if (!Number.isInteger(parsedAmount) || parsedAmount < 1 || parsedAmount > 1_000_000) {
-    res.status(400).json({ error: 'A quantidade deve ser um número inteiro entre 1 e 1.000.000.' });
-    return;
-  }
-
-  const cleanRef =
-    typeof reference === 'string' && reference.trim().length > 0
-      ? reference.trim()
-      : 'Emissão administrativa de créditos';
-
-  try {
-    const result = applyCreditDelta(
-      accountId.trim(),
-      parsedAmount,
-      LedgerEntryType.EMISSAO_MANUAL,
-      cleanRef,
-    );
-    res.status(201).json({
-      ...result,
-      accounts: accountsStore,
-      ledger: ledgerStore,
-    });
-  } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : 'Erro ao emitir créditos.' });
-  }
-});
-
-app.post('/api/credits/consume', (req, res) => {
-  const { accountId, amount, operation } = req.body ?? {};
-  const parsedAmount = Number(amount);
-
-  if (typeof accountId !== 'string' || !accountId.trim()) {
-    res.status(400).json({ error: 'Selecione uma conta para registar o consumo.' });
-    return;
-  }
-  if (!Number.isInteger(parsedAmount) || parsedAmount < 1 || parsedAmount > 100_000) {
-    res.status(400).json({ error: 'O consumo deve ser um número inteiro entre 1 e 100.000.' });
-    return;
-  }
-
-  const cleanOp =
-    typeof operation === 'string' && operation.trim().length > 0
-      ? operation.trim()
-      : 'Operação de consumo de créditos';
-
-  try {
-    const result = applyCreditDelta(
-      accountId.trim(),
-      -parsedAmount,
-      LedgerEntryType.CONSUMO_OPERACIONAL,
-      cleanOp,
-    );
-    res.status(201).json({
-      ...result,
-      accounts: accountsStore,
-      ledger: ledgerStore,
-    });
-  } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : 'Saldo insuficiente.' });
-  }
-});
-
-app.post('/api/vouchers', (req, res) => {
-  const { customCode, credits, maxUses, expiresAt, note } = req.body ?? {};
-  const parsedCredits = Number(credits);
-  const parsedUses = Number(maxUses);
-
-  if (!Number.isInteger(parsedCredits) || parsedCredits < 1 || parsedCredits > 100_000) {
-    res.status(400).json({ error: 'Os créditos do voucher devem estar entre 1 e 100.000.' });
-    return;
-  }
-  if (!Number.isInteger(parsedUses) || parsedUses < 1 || parsedUses > 10_000) {
-    res.status(400).json({ error: 'O limite de utilizações deve estar entre 1 e 10.000.' });
-    return;
-  }
-
-  const generated = `CREDI-${crypto.randomBytes(2).toString('hex').toUpperCase()}-${crypto
-    .randomBytes(2)
-    .toString('hex')
-    .toUpperCase()}`;
-  const code =
-    typeof customCode === 'string' && customCode.trim().length >= 4
-      ? customCode
-          .trim()
-          .toUpperCase()
-          .replace(/[^A-Z0-9_-]/g, '')
-          .slice(0, 28)
-      : generated;
-
-  if (vouchersStore.some((v) => v.code === code)) {
-    res.status(400).json({ error: `O código ${code} já existe no repositório.` });
-    return;
-  }
-
-  const validDate =
-    typeof expiresAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(expiresAt)
-      ? expiresAt
-      : '2027-01-31';
-
-  const voucher: CreditVoucher = {
-    id: `vch-${Date.now()}`,
-    code,
-    credits: parsedCredits,
-    maxUses: parsedUses,
-    usedCount: 0,
-    expiresAt: validDate,
-    status: VoucherStatus.ATIVO,
-    note:
-      typeof note === 'string' && note.trim().length > 0
-        ? note.trim().slice(0, 80)
-        : 'Código gerado no repositório',
+  const entry: LeaderboardEntry = {
+    id: `lb-${Date.now()}-${crypto.randomUUID().slice(0, 6)}`,
+    playerName: cleanName,
+    character: cleanChar,
+    cash: cleanCash,
+    missionsCompleted: cleanMissions,
+    maxStars: cleanStars,
+    platform: cleanPlatform,
     createdAt: new Date().toISOString().slice(0, 10),
   };
 
-  vouchersStore = [voucher, ...vouchersStore];
-  res.status(201).json({ voucher, vouchers: vouchersStore });
-});
+  leaderboardStore = [entry, ...leaderboardStore]
+    .sort((a, b) => b.cash - a.cash)
+    .slice(0, 15);
 
-app.post('/api/vouchers/redeem', (req, res) => {
-  const { code, accountId } = req.body ?? {};
-  if (typeof code !== 'string' || !code.trim()) {
-    res.status(400).json({ error: 'Indique o código do voucher a resgatar.' });
-    return;
-  }
-  if (typeof accountId !== 'string' || !accountId.trim()) {
-    res.status(400).json({ error: 'Selecione a conta que vai receber os créditos.' });
-    return;
-  }
-
-  const cleanCode = code.trim().toUpperCase();
-  const idx = vouchersStore.findIndex((v) => v.code === cleanCode);
-  if (idx === -1) {
-    res.status(404).json({ error: `Código "${cleanCode}" não encontrado.` });
-    return;
-  }
-
-  const voucher = vouchersStore[idx];
-  const today = new Date().toISOString().slice(0, 10);
-  if (voucher.expiresAt < today) {
-    vouchersStore[idx] = { ...voucher, status: VoucherStatus.EXPIRADO };
-    res.status(400).json({ error: 'Este voucher expirou e já não pode ser resgatado.' });
-    return;
-  }
-  if (voucher.usedCount >= voucher.maxUses || voucher.status !== VoucherStatus.ATIVO) {
-    vouchersStore[idx] = { ...voucher, status: VoucherStatus.ESGOTADO };
-    res.status(400).json({ error: 'Este voucher atingiu o limite máximo de utilizações.' });
-    return;
-  }
-
-  try {
-    const { account, entry } = applyCreditDelta(
-      accountId.trim(),
-      voucher.credits,
-      LedgerEntryType.RESGATE_VOUCHER,
-      `Voucher ${voucher.code}`,
-    );
-
-    const nextUsed = voucher.usedCount + 1;
-    vouchersStore[idx] = {
-      ...voucher,
-      usedCount: nextUsed,
-      status: nextUsed >= voucher.maxUses ? VoucherStatus.ESGOTADO : VoucherStatus.ATIVO,
-    };
-
-    res.json({
-      account,
-      entry,
-      accounts: accountsStore,
-      vouchers: vouchersStore,
-      ledger: ledgerStore,
-    });
-  } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : 'Erro no resgate.' });
-  }
-});
-
-app.post('/api/stripe/checkout-session', async (req, res) => {
-  const { packId, accountId } = req.body ?? {};
-  const pack = CREDIT_PACKS.find((p) => p.id === packId);
-  if (!pack) {
-    res.status(400).json({ error: 'Pacote de créditos inválido.' });
-    return;
-  }
-
-  const account = accountsStore.find((a) => a.id === accountId);
-  if (!account) {
-    res.status(400).json({ error: 'Conta de destino não encontrada.' });
-    return;
-  }
-
-  const stripe = getStripeClient();
-  if (!stripe) {
-    res.status(503).json({
-      error:
-        'A chave STRIPE_SECRET_KEY ainda não está configurada em Settings > Secrets. Configure-a no servidor para abrir o Checkout Stripe real.',
-    });
-    return;
-  }
-
-  const origin = resolveAppOrigin(req);
-  try {
-    const session = await stripe.checkout.sessions.create({
-      mode: pack.kind === 'subscription' ? 'subscription' : 'payment',
-      customer_email: account.email,
-      line_items: [
-        {
-          price_data: {
-            currency: 'eur',
-            product_data: {
-              name: `${pack.name} — ${pack.credits.toLocaleString('pt-PT')} créditos`,
-              description: pack.description,
-            },
-            unit_amount: Math.round(pack.priceEur * 100),
-            ...(pack.kind === 'subscription' ? { recurring: { interval: 'month' } } : {}),
-          },
-          quantity: 1,
-        },
-      ],
-      metadata: {
-        accountId: account.id,
-        packId: pack.id,
-        credits: String(pack.credits),
-      },
-      success_url: `${origin}/?stripe_status=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/?stripe_status=cancelled`,
-    });
-
-    res.json({ url: session.url, sessionId: session.id });
-  } catch (err) {
-    res.status(502).json({
-      error: err instanceof Error ? err.message : 'Erro ao criar sessão no Stripe.',
-    });
-  }
-});
-
-app.post('/api/stripe/verify-session', async (req, res) => {
-  const { sessionId } = req.body ?? {};
-  if (typeof sessionId !== 'string' || !sessionId.startsWith('cs_')) {
-    res.status(400).json({ error: 'ID de sessão Stripe inválido.' });
-    return;
-  }
-
-  if (processedStripeSessions.has(sessionId)) {
-    res.json({
-      alreadyProcessed: true,
-      accounts: accountsStore,
-      ledger: ledgerStore,
-    });
-    return;
-  }
-
-  const stripe = getStripeClient();
-  if (!stripe) {
-    res.status(503).json({ error: 'STRIPE_SECRET_KEY não configurada.' });
-    return;
-  }
-
-  try {
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    if (session.payment_status !== 'paid') {
-      res.status(400).json({ error: 'Pagamento ainda não confirmado pelo Stripe.' });
-      return;
-    }
-
-    const accountId = session.metadata?.accountId;
-    const packId = session.metadata?.packId;
-    const pack = CREDIT_PACKS.find((p) => p.id === packId);
-
-    if (!accountId || !pack) {
-      res.status(400).json({ error: 'Metadados da sessão incompletos.' });
-      return;
-    }
-
-    const { account, entry } = applyCreditDelta(
-      accountId,
-      pack.credits,
-      pack.kind === 'subscription'
-        ? LedgerEntryType.SUBSCRICAO_MENSAL
-        : LedgerEntryType.COMPRA_STRIPE,
-      `${pack.name} · Stripe ${session.id.slice(-8)}`,
-    );
-    processedStripeSessions.add(sessionId);
-
-    res.json({
-      account,
-      entry,
-      accounts: accountsStore,
-      ledger: ledgerStore,
-    });
-  } catch (err) {
-    res.status(502).json({
-      error: err instanceof Error ? err.message : 'Erro ao verificar sessão Stripe.',
-    });
-  }
+  res.status(201).json({ entry, entries: leaderboardStore.slice(0, 10) });
 });
 
 async function startServer() {
@@ -528,8 +196,315 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`CreditoHub server listening on http://0.0.0.0:${PORT}`);
+  const server = http.createServer(app);
+  const wss = new WebSocketServer({ server, path: '/ws/leonida' });
+
+  wss.on('connection', (ws) => {
+    const clientId = crypto.randomUUID().slice(0, 10);
+    let currentRoomId = 'porto-ribeira';
+    let joined = false;
+    let lastChatAt = 0;
+    let lastPspActionAt = 0;
+    let lastEmergencyAt = 0;
+
+    ws.on('message', (rawBuf) => {
+      let msg: Record<string, unknown>;
+      try {
+        const text = rawBuf.toString('utf8');
+        if (text.length > 4096) return;
+        msg = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+
+      const type = msg.type;
+      if (type === 'join') {
+        if (joined) {
+          const oldRoom = rooms.get(currentRoomId);
+          oldRoom?.delete(clientId);
+          broadcastRoom(currentRoomId, { type: 'player:leave', id: clientId });
+        }
+        currentRoomId = sanitizeRoomId(msg.roomId);
+        const room = getRoom(currentRoomId);
+        const prof = VALID_PROFESSIONS.has(msg.profession as ProfessionId)
+          ? (msg.profession as ProfessionId)
+          : 'taxi';
+
+        const player: ServerPlayer = {
+          id: clientId,
+          roomId: currentRoomId,
+          name: sanitizeName(msg.name),
+          character: msg.character === 'jason' ? 'jason' : 'lucia',
+          profession: prof,
+          onDuty: msg.onDuty !== false,
+          drivingPoints: Math.round(clampNum(msg.drivingPoints, 0, 12, 12)),
+          sirenActive: Boolean(msg.sirenActive),
+          x: clampNum(msg.x, 30, 3180, 1640),
+          y: clampNum(msg.y, 30, 2370, 940),
+          vx: 0,
+          vy: 0,
+          angle: clampNum(msg.angle, -Math.PI * 2, Math.PI * 2, -Math.PI / 2),
+          speed: 0,
+          vehicleType: null,
+          vehicleColor: '#F43F5E',
+          weaponId: VALID_WEAPONS.has(msg.weaponId as WeaponId) ? (msg.weaponId as WeaponId) : 'pistol',
+          hp: 100,
+          wantedStars: 0,
+          updatedAt: Date.now(),
+        };
+
+        room.set(clientId, { player, ws });
+        joined = true;
+
+        const snapshot = Array.from(room.values()).map((c) => c.player);
+        ws.send(
+          JSON.stringify({
+            type: 'welcome',
+            id: clientId,
+            roomId: currentRoomId,
+            players: snapshot,
+          }),
+        );
+
+        broadcastRoom(currentRoomId, { type: 'player:upsert', player }, clientId);
+        broadcastRoom(currentRoomId, {
+          type: 'chat:message',
+          message: {
+            id: `sys-${Date.now()}-${crypto.randomUUID().slice(0, 6)}-${clientId}`,
+            sender: 'Porto Live',
+            text: `${player.name} entrou em ${currentRoomId}.`,
+            kind: 'system',
+            timestamp: Date.now(),
+          },
+        });
+        return;
+      }
+
+      if (!joined) return;
+      const room = rooms.get(currentRoomId);
+      const entry = room?.get(clientId);
+      if (!room || !entry) return;
+
+      if (type === 'state') {
+        const p = entry.player;
+        p.x = clampNum(msg.x, 20, 3180, p.x);
+        p.y = clampNum(msg.y, 20, 2380, p.y);
+        p.vx = clampNum(msg.vx, -900, 900, 0);
+        p.vy = clampNum(msg.vy, -900, 900, 0);
+        p.angle = clampNum(msg.angle, -Math.PI * 4, Math.PI * 4, p.angle);
+        p.speed = clampNum(msg.speed, -400, 900, 0);
+        p.vehicleType = VALID_VEHICLES.has(msg.vehicleType as VehicleType)
+          ? (msg.vehicleType as VehicleType)
+          : null;
+        p.vehicleColor = sanitizeColor(msg.vehicleColor);
+        p.weaponId = VALID_WEAPONS.has(msg.weaponId as WeaponId) ? (msg.weaponId as WeaponId) : p.weaponId;
+        p.hp = clampNum(msg.hp, 0, 150, p.hp);
+        p.wantedStars = Math.round(clampNum(msg.wantedStars, 0, 5, p.wantedStars));
+        if (VALID_PROFESSIONS.has(msg.profession as ProfessionId)) {
+          p.profession = msg.profession as ProfessionId;
+        }
+        if (typeof msg.onDuty === 'boolean') {
+          p.onDuty = msg.onDuty;
+        }
+        if (msg.drivingPoints !== undefined) {
+          p.drivingPoints = Math.round(clampNum(msg.drivingPoints, 0, 12, p.drivingPoints));
+        }
+        if (typeof msg.sirenActive === 'boolean') {
+          p.sirenActive = msg.sirenActive;
+        }
+        if (msg.character === 'jason' || msg.character === 'lucia') {
+          p.character = msg.character;
+        }
+        p.updatedAt = Date.now();
+
+        broadcastRoom(currentRoomId, { type: 'player:upsert', player: p }, clientId);
+        return;
+      }
+
+      if (type === 'fire') {
+        const weaponId = VALID_WEAPONS.has(msg.weaponId as WeaponId)
+          ? (msg.weaponId as WeaponId)
+          : entry.player.weaponId;
+        const bx = clampNum(msg.x, 20, 3180, entry.player.x);
+        const by = clampNum(msg.y, 20, 2380, entry.player.y);
+        const angle = clampNum(msg.angle, -Math.PI * 4, Math.PI * 4, entry.player.angle);
+        broadcastRoom(
+          currentRoomId,
+          {
+            type: 'player:fire',
+            id: clientId,
+            weaponId,
+            x: bx,
+            y: by,
+            angle,
+          },
+          clientId,
+        );
+        return;
+      }
+
+      if (type === 'hit') {
+        const targetId = typeof msg.targetId === 'string' ? msg.targetId : '';
+        const target = room.get(targetId);
+        if (!target || targetId === clientId) return;
+        const distSq =
+          Math.pow(target.player.x - entry.player.x, 2) +
+          Math.pow(target.player.y - entry.player.y, 2);
+        if (distSq > 1100 * 1100) return;
+
+        const dmg = Math.round(clampNum(msg.damage, 1, 150, 20));
+        if (target.ws.readyState === WebSocket.OPEN) {
+          target.ws.send(
+            JSON.stringify({
+              type: 'player:hit',
+              attackerId: clientId,
+              attackerName: entry.player.name,
+              damage: dmg,
+            }),
+          );
+        }
+        return;
+      }
+
+      if (type === 'psp:action') {
+        const now = Date.now();
+        if (now - lastPspActionAt < 4000) return;
+        if (entry.player.profession !== 'psp' || !entry.player.onDuty) return;
+
+        const targetId = typeof msg.targetId === 'string' ? msg.targetId : '';
+        const target = room.get(targetId);
+        if (!target || targetId === clientId) return;
+
+        const distSq =
+          Math.pow(target.player.x - entry.player.x, 2) +
+          Math.pow(target.player.y - entry.player.y, 2);
+        if (distSq > 260 * 260) return;
+
+        lastPspActionAt = now;
+        const actionKind = msg.actionKind === 'fine' ? 'fine' : 'warn';
+        const fineAmount =
+          actionKind === 'fine' ? Math.round(clampNum(msg.fineAmount, 50, 200, 90)) : 0;
+        const reason =
+          typeof msg.reason === 'string'
+            ? msg.reason.replace(/[<>]/g, '').trim().slice(0, 80) || 'Fiscalização de trânsito'
+            : 'Fiscalização de trânsito';
+
+        if (target.ws.readyState === WebSocket.OPEN) {
+          target.ws.send(
+            JSON.stringify({
+              type: 'psp:noticed',
+              officerName: entry.player.name,
+              actionKind,
+              fineAmount,
+              reason,
+            }),
+          );
+        }
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: 'psp:confirmed',
+              targetName: target.player.name,
+              actionKind,
+              fineAmount,
+            }),
+          );
+        }
+        broadcastRoom(currentRoomId, {
+          type: 'chat:message',
+          message: {
+            id: `psp-${now}-${crypto.randomUUID().slice(0, 6)}-${clientId}`,
+            sender: 'PSP Porto',
+            text:
+              actionKind === 'fine'
+                ? `Agente ${entry.player.name} aplicou coima de €${fineAmount} a ${target.player.name} (${reason}).`
+                : `Agente ${entry.player.name} emitiu aviso preventivo a ${target.player.name}.`,
+            kind: 'system',
+            timestamp: now,
+          },
+        });
+        return;
+      }
+
+      if (type === 'emergency:call') {
+        const now = Date.now();
+        if (now - lastEmergencyAt < 3000) return;
+        lastEmergencyAt = now;
+        const kind = msg.kind === 'speed' ? 'speed' : '112';
+        const px = clampNum(msg.x, 20, 3180, entry.player.x);
+        const py = clampNum(msg.y, 20, 2380, entry.player.y);
+        const speedKmh =
+          msg.speedKmh !== undefined ? Math.round(clampNum(msg.speedKmh, 0, 350, 0)) : undefined;
+        const label =
+          typeof msg.label === 'string'
+            ? msg.label.replace(/[<>]/g, '').trim().slice(0, 72) || 'Ocorrência no Porto'
+            : 'Ocorrência no Porto';
+
+        broadcastRoom(currentRoomId, {
+          type: 'emergency:ping',
+          id: `em-${now}-${crypto.randomUUID().slice(0, 6)}`,
+          kind,
+          label,
+          x: px,
+          y: py,
+          callerName: entry.player.name,
+          speedKmh,
+          createdAt: now,
+        });
+        return;
+      }
+
+      if (type === 'chat') {
+        const now = Date.now();
+        if (now - lastChatAt < 700) return;
+        lastChatAt = now;
+        const text =
+          typeof msg.text === 'string'
+            ? msg.text.replace(/[<>]/g, '').trim().slice(0, 140)
+            : '';
+        if (!text) return;
+        broadcastRoom(currentRoomId, {
+          type: 'chat:message',
+          message: {
+            id: `msg-${now}-${crypto.randomUUID().slice(0, 6)}-${clientId}`,
+            sender: entry.player.name,
+            text,
+            kind: 'chat',
+            timestamp: now,
+          },
+        });
+      }
+    });
+
+    ws.on('close', () => {
+      if (!joined) return;
+      const room = rooms.get(currentRoomId);
+      const leaving = room?.get(clientId);
+      if (room) {
+        room.delete(clientId);
+        if (room.size === 0) {
+          rooms.delete(currentRoomId);
+        } else {
+          broadcastRoom(currentRoomId, { type: 'player:leave', id: clientId });
+          if (leaving) {
+            broadcastRoom(currentRoomId, {
+              type: 'chat:message',
+              message: {
+                id: `sys-${Date.now()}-${crypto.randomUUID().slice(0, 6)}-${clientId}`,
+                sender: 'Porto Live',
+                text: `${leaving.player.name} saiu da sessão.`,
+                kind: 'system',
+                timestamp: Date.now(),
+              },
+            });
+          }
+        }
+      }
+    });
+  });
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Porto Rush server listening on http://0.0.0.0:${PORT}`);
   });
 }
 
