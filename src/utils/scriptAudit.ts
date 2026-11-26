@@ -25,7 +25,9 @@ export function analyzeAndModernizeScript(filename: string, rawContent: string):
   const content = typeof rawContent === 'string' ? rawContent : '';
   const isPowerShell = cleanName.toLowerCase().endsWith('.ps1');
   const rawLines = content.split(/\r?\n/);
-  const activeLines = rawLines.filter((line) => !isCommentLine(line));
+  const activeLines = rawLines
+    .map((line, index) => ({ line, number: index + 1 }))
+    .filter((entry) => !isCommentLine(entry.line));
   const findings: ScriptFinding[] = [];
 
   const add = (
@@ -36,12 +38,12 @@ export function analyzeAndModernizeScript(filename: string, rawContent: string):
     description: string,
     remediation: string,
   ) => {
-    const index = activeLines.findIndex((line) => expression.test(line));
+    const index = activeLines.findIndex((entry) => expression.test(entry.line));
     if (index >= 0) {
       findings.push({
         id,
         severity,
-        lineRef: 'Linha ' + String(index + 1),
+        lineRef: 'Linha ' + String(activeLines[index].number),
         title,
         description,
         remediation,

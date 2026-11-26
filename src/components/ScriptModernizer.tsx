@@ -52,7 +52,7 @@ export const ScriptModernizer: React.FC<ScriptModernizerProps> = ({
       setMessage('Análise concluída. O conteúdo não foi guardado nem executado.');
     } catch {
       setAudit(analyzeAndModernizeScript(nextFilename, nextContent));
-      setMessage('Análise local concluída. O servidor não respondeu; nada foi enviado ou executado.');
+      setMessage('Análise local concluída. Não foi possível confirmar a resposta do servidor; o PublicaFix não executou o ficheiro.');
     } finally {
       setIsAnalyzing(false);
     }

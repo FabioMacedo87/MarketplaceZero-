@@ -5,6 +5,7 @@ import { analyzeAndModernizeScript } from './scriptAudit.ts';
 test('deteta ExecutionPolicy Bypass e pausa interativa', () => {
   const result = analyzeAndModernizeScript('start.cmd', 'powershell.exe -ExecutionPolicy Bypass -File fix.ps1\npause');
   assert.ok(result.findings.some((item) => item.id === 'exec-policy-bypass'));
+  assert.equal(result.findings.find((item) => item.id === 'exec-policy-bypass')?.lineRef, 'Linha 1');
   assert.ok(result.findings.some((item) => item.id === 'blocking-pause'));
 });
 
@@ -12,6 +13,11 @@ test('não assinala padrões que aparecem apenas em comentários', () => {
   const result = analyzeAndModernizeScript('start.cmd', 'REM powershell.exe -ExecutionPolicy Bypass -File fix.ps1\n:: pause');
   assert.equal(result.findings.some((item) => item.id === 'exec-policy-bypass'), false);
   assert.equal(result.findings.some((item) => item.id === 'blocking-pause'), false);
+});
+
+test('preserva os números de linha originais depois de ignorar comentários', () => {
+  const result = analyzeAndModernizeScript('start.cmd', 'REM comentário\npowershell.exe -ExecutionPolicy Bypass -File fix.ps1');
+  assert.equal(result.findings.find((item) => item.id === 'exec-policy-bypass')?.lineRef, 'Linha 2');
 });
 
 test('deteta execução dinâmica e credencial potencialmente embutida em PowerShell', () => {
