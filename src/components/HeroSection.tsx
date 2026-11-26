@@ -10,7 +10,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onJumpToModernizer }) 
     <div className="max-w-[1200px] mx-auto px-6">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
         <div className="lg:col-span-6">
-          <p className="text-xs font-semibold tracking-wide text-[#1D4ED8] mb-4">BETA GRATUITO · ANÁLISE ESTÁTICA DE SCRIPTS</p>
+          <p className="text-xs font-semibold tracking-wide text-[#1D4ED8] mb-4">CONTA GRATUITA · 5 ANÁLISES/MÊS · ANÁLISE ESTÁTICA</p>
           <h1 className="font-display font-bold tracking-tight text-[#0F172A] text-balance leading-[1.08]" style={{ fontSize: 'clamp(2.25rem, 4vw, 3.5rem)' }}>
             Analisa os teus scripts antes de os executares.
           </h1>
