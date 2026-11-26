@@ -1,126 +1,61 @@
-export const BillingCycle = {
-  MONTHLY: 'monthly',
-  ANNUAL: 'annual',
+export const LedgerEntryType = {
+  EMISSAO_MANUAL: 'Emissão Manual',
+  RESGATE_VOUCHER: 'Resgate de Voucher',
+  COMPRA_STRIPE: 'Compra Stripe',
+  SUBSCRICAO_MENSAL: 'Subscrição Mensal',
+  CONSUMO_OPERACIONAL: 'Consumo Operacional',
 } as const;
-export type BillingCycle = (typeof BillingCycle)[keyof typeof BillingCycle];
+export type LedgerEntryType = (typeof LedgerEntryType)[keyof typeof LedgerEntryType];
 
-export const PlanId = {
-  ESSENCIAL: 'essencial',
-  PROFISSIONAL: 'profissional',
-  EMPRESARIAL: 'empresarial',
+export const VoucherStatus = {
+  ATIVO: 'Ativo',
+  ESGOTADO: 'Esgotado',
+  EXPIRADO: 'Expirado',
 } as const;
-export type PlanId = (typeof PlanId)[keyof typeof PlanId];
+export type VoucherStatus = (typeof VoucherStatus)[keyof typeof VoucherStatus];
 
-export const CurrencyCode = {
-  EUR: 'EUR',
-  BRL: 'BRL',
-} as const;
-export type CurrencyCode = (typeof CurrencyCode)[keyof typeof CurrencyCode];
-
-export const ReleaseStatus = {
-  CONCLUIDA: 'Concluída',
-  REVERTIDA: 'Revertida',
-  EM_VALIDACAO: 'Em Validação',
-  FALHADA: 'Falhada',
-} as const;
-export type ReleaseStatus = (typeof ReleaseStatus)[keyof typeof ReleaseStatus];
-
-export const FindingSeverity = {
-  CRITICO: 'Crítico',
-  ATENCAO: 'Atenção',
-  RECOMENDADO: 'Recomendado',
-} as const;
-export type FindingSeverity = (typeof FindingSeverity)[keyof typeof FindingSeverity];
-
-export interface PlanDefinition {
-  id: PlanId;
+export interface CreditAccount {
+  id: string;
   name: string;
-  audience: string;
-  summary: string;
-  monthlyPriceEur: number;
-  monthlyPriceBrl: number;
-  monthlyQuota: number | null;
-  maxProjects: number | null;
-  retentionDays: number;
-  supportsRollback: boolean;
-  supportsDigitalSignature: boolean;
-  supportsApprovals: boolean;
-  highlighted?: boolean;
-  features: string[];
-}
-
-export interface ScriptFinding {
-  id: string;
-  severity: FindingSeverity;
-  lineRef: string;
-  title: string;
-  description: string;
-  remediation: string;
-}
-
-export interface ScriptAuditResult {
-  filename: string;
-  detectedType: 'batch' | 'powershell';
-  checksPassed: number;
-  totalChecks: number;
-  findings: ScriptFinding[];
-  hardenedCmd: string;
-  hardenedPs1: string;
-}
-
-export interface ReleaseStep {
-  name: string;
-  status: 'Concluída' | 'Em Curso' | 'Pendente' | 'Falhada';
-  durationMs: number;
-  detail: string;
-}
-
-export interface ReleaseRecord {
-  id: string;
-  title: string;
-  scriptName: string;
-  environment: 'Produção' | 'Pré-Produção' | 'Homologação';
-  operator: string;
-  createdAt: string;
-  durationSec: number;
-  status: ReleaseStatus;
-  exitCode: number;
-  checksum: string;
-  steps: ReleaseStep[];
-  logs: string[];
-}
-
-export interface InvoiceRecord {
-  id: string;
-  number: string;
-  issuedAt: string;
+  email: string;
   planName: string;
-  cycle: BillingCycle;
-  currency: CurrencyCode;
-  subtotal: number;
-  vatAmount: number;
-  total: number;
-  status: 'Paga' | 'Pendente';
-  paymentMethod: string;
+  balance: number;
+  totalIssued: number;
+  totalConsumed: number;
+  updatedAt: string;
 }
 
-export interface SubscriptionState {
-  active: boolean;
-  planId: PlanId;
-  cycle: BillingCycle;
-  currency: CurrencyCode;
-  workspaceName: string;
-  billingEmail: string;
-  taxId: string;
-  paymentMethod: string;
-  nextBillingDate: string;
-  autoRenew: boolean;
-  usedQuotaThisMonth: number;
+export interface CreditVoucher {
+  id: string;
+  code: string;
+  credits: number;
+  maxUses: number;
+  usedCount: number;
+  expiresAt: string;
+  status: VoucherStatus;
+  note: string;
+  createdAt: string;
 }
 
-export interface TeamSettings {
-  notificationEmail: string;
-  webhookUrl: string;
-  requireProdConfirmation: boolean;
-  autoRollbackOnFailure: boolean;
+export interface CreditPack {
+  id: string;
+  name: string;
+  kind: 'pack' | 'subscription';
+  credits: number;
+  priceEur: number;
+  intervalLabel: string;
+  description: string;
+  highlighted?: boolean;
+}
+
+export interface LedgerEntry {
+  id: string;
+  accountId: string;
+  accountName: string;
+  type: LedgerEntryType;
+  delta: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  reference: string;
+  createdAt: string;
 }
