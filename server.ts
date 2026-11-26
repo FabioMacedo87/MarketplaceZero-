@@ -15,7 +15,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
 const supabaseSecret = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const stripeSecret = process.env.STRIPE_SECRET_KEY || '';
-const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';\nconst stripePortalConfiguration = process.env.STRIPE_BILLING_PORTAL_CONFIGURATION || 'bpc_1Ug9Gr2VZXUfhutCKuxTaC3c';
 const appUrl = (process.env.APP_URL || '').replace(/\/+$/, '');
 
 const admin = supabaseUrl && supabaseSecret
@@ -40,7 +40,7 @@ function billingConfigurationReady(): boolean {
     process.env.PUBLICAFIX_LIVE_BILLING_ENABLED === 'true' &&
     admin &&
     stripe &&
-    stripeWebhookSecret.startsWith('whsec_') &&
+    stripeWebhookSecret.startsWith('whsec_') &&\n    stripePortalConfiguration.startsWith('bpc_') &&
     /^https:\/\//i.test(appUrl) &&
     planConfiguration.essencial.priceId &&
     planConfiguration.profissional.priceId &&
