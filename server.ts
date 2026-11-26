@@ -37,6 +37,7 @@ type PlanKey = keyof typeof planConfiguration;
 
 function billingConfigurationReady(): boolean {
   return Boolean(
+    process.env.PUBLICAFIX_LIVE_BILLING_ENABLED === 'true' &&
     admin &&
     stripe &&
     stripeWebhookSecret.startsWith('whsec_') &&
@@ -220,8 +221,36 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-app.get('/api/public-config', (_req, res) => {
-  res.json({ billingReady: billingConfigurationReady() });
+app.get('/api/public-config', async (_req, res) => {
+  if (!billingConfigurationReady() || !stripe) {
+    res.json({ billingReady: false, prices: {} });
+    return;
+  }
+
+  try {
+    const entries = Object.entries(planConfiguration) as Array<[PlanKey, { priceId: string }]>;
+    const checked = await Promise.all(entries.map(async ([planKey, config]) => {
+      const price = await stripe.prices.retrieve(config.priceId);
+      if (
+        !price.active ||
+        !price.livemode ||
+        price.currency !== 'eur' ||
+        price.recurring?.interval !== 'month' ||
+        typeof price.unit_amount !== 'number' ||
+        !Number.isInteger(price.unit_amount) ||
+        price.unit_amount <= 0
+      ) {
+        throw new Error('Invalid live monthly EUR price configured for ' + planKey);
+      }
+      return [planKey, price.unit_amount] as const;
+    }));
+
+    const prices = Object.fromEntries(checked) as Record<PlanKey, number>;
+    res.json({ billingReady: true, prices });
+  } catch (error) {
+    console.error('PublicaFix price configuration check failed:', error instanceof Error ? error.message : 'unknown error');
+    res.json({ billingReady: false, prices: {} });
+  }
 });
 
 app.get('/api/initial-script', (_req, res) => {
