@@ -28,9 +28,9 @@ const admin = supabaseUrl && supabaseSecret
 const stripe = /^(sk|rk)_live_/.test(stripeSecret) ? new Stripe(stripeSecret) : null;
 
 const planConfiguration = {
-  essencial: { priceId: process.env.STRIPE_PRICE_ESSENCIAL || '' },
-  profissional: { priceId: process.env.STRIPE_PRICE_PROFISSIONAL || '' },
-  empresarial: { priceId: process.env.STRIPE_PRICE_EMPRESARIAL || '' },
+  essencial: { priceId: process.env.STRIPE_PRICE_ESSENCIAL || 'price_1Ug9FX2VZXUfhutCzzLhenRY' },
+  profissional: { priceId: process.env.STRIPE_PRICE_PROFISSIONAL || 'price_1Ug9FZ2VZXUfhutCaGvShtFv' },
+  empresarial: { priceId: process.env.STRIPE_PRICE_EMPRESARIAL || 'price_1Ug9Fb2VZXUfhutCfQD1fx4S' },
 } as const;
 
 type PlanKey = keyof typeof planConfiguration;
