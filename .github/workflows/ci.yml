@@ -1,4 +1,5 @@
 name: PublicaFix CI
+# This workflow validates the live, non-billing static-audit beta.
 
 on:
   push:
