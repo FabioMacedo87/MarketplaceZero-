@@ -14,6 +14,14 @@ interface AccountSectionProps {
   billingReady: boolean;
 }
 
+interface UsageSummary {
+  plan: string;
+  used: number;
+  limit: number;
+  remaining: number;
+  monthStart: string;
+}
+
 const statusLabels: Record<string, string> = {
   trialing: 'Período experimental',
   active: 'Ativa',
@@ -26,6 +34,7 @@ const statusLabels: Record<string, string> = {
 };
 
 const planLabels: Record<string, string> = {
+  gratuito: 'Gratuito',
   essencial: 'Essencial',
   profissional: 'Profissional',
   empresarial: 'Empresarial',
@@ -40,6 +49,7 @@ export const AccountSection: React.FC<AccountSectionProps> = ({ billingReady }) 
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState('');
   const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
@@ -65,6 +75,7 @@ export const AccountSection: React.FC<AccountSectionProps> = ({ billingReady }) 
   useEffect(() => {
     if (!session) {
       setSubscription(null);
+      setUsage(null);
       return;
     }
 
@@ -75,13 +86,19 @@ export const AccountSection: React.FC<AccountSectionProps> = ({ billingReady }) 
     })
       .then(async (response) => {
         if (!response.ok) return null;
-        return response.json() as Promise<{ subscription: SubscriptionSummary | null }>;
+        return response.json() as Promise<{ subscription: SubscriptionSummary | null; usage: UsageSummary }>;
       })
       .then((data) => {
-        if (active && data) setSubscription(data.subscription);
+        if (active && data) {
+          setSubscription(data.subscription);
+          setUsage(data.usage);
+        }
       })
       .catch(() => {
-        if (active) setSubscription(null);
+        if (active) {
+          setSubscription(null);
+          setUsage(null);
+        }
       });
 
     return () => {
@@ -201,7 +218,23 @@ export const AccountSection: React.FC<AccountSectionProps> = ({ billingReady }) 
                   )}
                 </>
               ) : (
-                <p className="mt-2 text-sm text-slate-600">Ainda não existe uma subscrição associada a esta conta.</p>
+                <p className="mt-2 text-sm text-slate-600">Conta gratuita · sem subscrição paga ativa.</p>
+              )}
+            </div>
+
+            <div className="mt-4 rounded-lg border border-slate-200 p-4">
+              <p className="text-xs uppercase tracking-wide font-semibold text-slate-500">Utilização mensal</p>
+              {usage ? (
+                <>
+                  <p className="mt-2 font-semibold text-[#0F172A]">
+                    {planLabels[usage.plan] || usage.plan} · {usage.used} de {usage.limit} análises utilizadas
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {usage.remaining} {usage.remaining === 1 ? 'análise restante' : 'análises restantes'} este mês
+                  </p>
+                </>
+              ) : (
+                <p className="mt-2 text-sm text-slate-600">A consultar a utilização deste mês…</p>
               )}
             </div>
 
@@ -245,7 +278,7 @@ export const AccountSection: React.FC<AccountSectionProps> = ({ billingReady }) 
               {loading ? 'A processar…' : isSignUp ? 'Criar conta gratuita' : 'Entrar'}
             </button>
             <p className="mt-3 text-xs text-slate-500">
-              Ao criares uma conta, poderás receber um email para confirmar o endereço antes de iniciar sessão.
+              A conta gratuita inclui 5 análises por mês. Ao criares uma conta, poderás receber um email para confirmar o endereço antes de iniciar sessão.
             </p>
           </form>
         )}
