@@ -6,98 +6,72 @@ import { ORIGINAL_ATTACHED_CMD, analyzeAndModernizeScript } from './src/utils/sc
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '64kb' }));
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'PublicaFix' });
+  res.json({ ok: true, service: 'PublicaFix', mode: 'static-audit-beta' });
 });
 
 app.get('/api/initial-script', (_req, res) => {
-  const attachedPath = path.resolve(
-    __dirname,
-    'public/assets/aistudio/INICIAR-CORRECAO_5576a76e.cmd',
-  );
+  const attachedPath = path.resolve(__dirname, 'public/assets/aistudio/INICIAR-CORRECAO_5576a76e.cmd');
   let content = ORIGINAL_ATTACHED_CMD;
-  let filename = 'INICIAR-CORRECAO_5576a76e.cmd';
-
+  let filename = 'INICIAR-CORRECAO.cmd';
   try {
-    if (fs.existsSync(attachedPath)) {
-      content = fs.readFileSync(attachedPath, 'utf-8');
-    }
+    if (fs.existsSync(attachedPath)) content = fs.readFileSync(attachedPath, 'utf-8');
   } catch {
-    // Fallback to embedded attached script content
+    // Keep the embedded sample if the file is unavailable.
   }
-
-  res.json({
-    filename,
-    content,
-    audit: analyzeAndModernizeScript(filename, content),
-  });
-});
-
-app.get('/api/workspace', (_req, res) => {
-  res.status(503).json({
-    code: 'AUTH_NOT_CONFIGURED',
-    error: 'A área pessoal está temporariamente indisponível até a autenticação e o armazenamento estarem configurados.',
-  });
+  res.json({ filename, content, stored: false, executed: false });
 });
 
 app.post('/api/audit-script', (req, res) => {
-  const { filename, content } = req.body ?? {};
+  const body = req.body ?? {};
+  const { filename, content } = body;
+
   if (typeof content !== 'string' || content.trim().length === 0) {
     res.status(400).json({ error: 'O conteúdo do script não pode estar vazio.' });
     return;
   }
-  if (content.length > 32000) {
-    res.status(400).json({ error: 'O script excede o limite de 32 KB para análise.' });
+  if (Buffer.byteLength(content, 'utf8') > 32 * 1024) {
+    res.status(413).json({ error: 'O script excede o limite de 32 KB para análise.' });
     return;
   }
 
-  const safeFilename =
-    typeof filename === 'string' && filename.trim().length > 0
-      ? filename.trim().slice(0, 80)
-      : 'INICIAR-CORRECAO.cmd';
+  const requestedName = typeof filename === 'string' ? filename : 'script.cmd';
+  const safeFilename = requestedName.replace(/^.*[\\/]/, '').replace(/[^\w.-]/g, '_').slice(0, 80);
+  if (!/\.(cmd|bat|ps1)$/i.test(safeFilename)) {
+    res.status(400).json({ error: 'Formato não suportado. Use .cmd, .bat ou .ps1.' });
+    return;
+  }
 
   const audit = analyzeAndModernizeScript(safeFilename, content);
-  res.json({ audit });
+  res.json({ audit, engine: 'publicafix-static-rules-v1', stored: false, executed: false });
 });
 
-app.post('/api/releases', (_req, res) => {
-  res.status(503).json({
-    code: 'LOCAL_RUNNER_NOT_CONFIGURED',
-    error: 'A execução de scripts está desativada. O PublicaFix não executa ficheiros enviados pelos clientes no servidor.',
-  });
-});
-
-app.post('/api/releases/:id/rollback', (_req, res) => {
-  res.status(503).json({
-    code: 'LOCAL_RUNNER_NOT_CONFIGURED',
-    error: 'A reversão remota está desativada até existir um agente local autenticado e seguro.',
-  });
-});
-
-app.post('/api/subscriptions', (_req, res) => {
-  res.status(503).json({
-    code: 'BILLING_NOT_CONFIGURED',
-    error: 'O checkout real ainda não está configurado. Não foi cobrado qualquer valor.',
-  });
-});
-
-app.post('/api/subscriptions/toggle-renew', (_req, res) => {
-  res.status(503).json({
-    code: 'BILLING_NOT_CONFIGURED',
-    error: 'A gestão de renovações só estará disponível depois da integração Stripe.',
-  });
-});
-
-app.put('/api/settings', (_req, res) => {
+// These features remain unavailable until their required architecture exists.
+app.all(['/api/workspace', '/api/settings'], (_req, res) => {
   res.status(503).json({
     code: 'AUTH_NOT_CONFIGURED',
-    error: 'As definições da equipa estarão disponíveis depois da autenticação e do armazenamento estarem configurados.',
+    error: 'Esta funcionalidade ainda não está disponível no beta. Não são guardados dados de conta.',
+  });
+});
+app.all(['/api/releases', '/api/releases/:id/rollback'], (_req, res) => {
+  res.status(503).json({
+    code: 'EXECUTION_NOT_AVAILABLE',
+    error: 'O PublicaFix não executa nem reverte scripts nesta versão.',
+  });
+});
+app.all(['/api/subscriptions', '/api/subscriptions/toggle-renew'], (_req, res) => {
+  res.status(503).json({
+    code: 'BILLING_NOT_CONFIGURED',
+    error: 'As subscrições ainda não estão disponíveis. Não foi cobrado qualquer valor.',
   });
 });
 
@@ -124,7 +98,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`PublicaFix server listening on http://0.0.0.0:${PORT}`);
+    console.log('PublicaFix server listening on http://0.0.0.0:' + PORT);
   });
 }
 
