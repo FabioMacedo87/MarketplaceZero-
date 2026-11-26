@@ -13,6 +13,13 @@ alter table public.analysis_usage_monthly enable row level security;
 revoke all on table public.analysis_usage_monthly from public, anon, authenticated;
 grant select, insert, update on table public.analysis_usage_monthly to service_role;
 
+create policy "Service role manages monthly analysis quota"
+on public.analysis_usage_monthly
+for all
+to service_role
+using (true)
+with check (true);
+
 create or replace function public.consume_analysis_quota(
   p_user_id uuid,
   p_limit integer
