@@ -14,7 +14,7 @@ type PlanKey = 'essencial' | 'profissional' | 'empresarial';
 export default function App() {
   const [scriptName, setScriptName] = useState('INICIAR-CORRECAO.cmd');
   const [scriptContent, setScriptContent] = useState(ORIGINAL_ATTACHED_CMD);
-  const [billingReady, setBillingReady] = useState(false);
+  const [billingReady, setBillingReady] = useState(false);\n  const [planPrices, setPlanPrices] = useState<Partial<Record<PlanKey, number>>>({});
   const [checkoutMessage, setCheckoutMessage] = useState('');
 
   useEffect(() => {
@@ -33,10 +33,10 @@ export default function App() {
     fetch('/api/public-config', { cache: 'no-store' })
       .then((response) => response.ok ? response.json() : null)
       .then((data) => {
-        if (active && data) setBillingReady(data.billingReady === true);
+        if (active && data) {\n          setBillingReady(data.billingReady === true);\n          setPlanPrices(data.prices && typeof data.prices === 'object' ? data.prices : {});\n        }
       })
       .catch(() => {
-        if (active) setBillingReady(false);
+        if (active) { setBillingReady(false); setPlanPrices({}); }
       });
 
     return () => {
@@ -91,7 +91,7 @@ export default function App() {
         <CapabilitiesSection />
         <ScriptModernizer initialFilename={scriptName} initialContent={scriptContent} />
         <AccountSection billingReady={billingReady} />
-        <PricingSection billingReady={billingReady} onSubscribe={beginCheckout} />
+        <PricingSection billingReady={billingReady} prices={planPrices} onSubscribe={beginCheckout} />
         {checkoutMessage && (
           <div role="status" className="max-w-[1200px] mx-auto px-6 py-4 text-sm text-slate-700">
             {checkoutMessage}
