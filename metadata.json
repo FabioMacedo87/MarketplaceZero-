@@ -1,0 +1,6 @@
+{
+  "name": "PublicaFix",
+  "description": "Plataforma SaaS de automatização de correções, modernização de scripts PowerShell e Batch e gestão de publicações com subscrição mensal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
