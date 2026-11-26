@@ -93,7 +93,7 @@ export default function App() {
       <main className="flex-1">
         <HeroSection onJumpToModernizer={() => navigateTo('modernizador')} />
         <CapabilitiesSection />
-        <ScriptModernizer initialFilename={scriptName} initialContent={scriptContent} />
+        <ScriptModernizer initialFilename={scriptName} initialContent={scriptContent} onRequireAuth={() => navigateTo('conta')} />
         <AccountSection billingReady={billingReady} />
         <PricingSection billingReady={billingReady} prices={planPrices} onSubscribe={beginCheckout} />
         {checkoutMessage && (
