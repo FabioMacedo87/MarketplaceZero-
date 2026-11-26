@@ -28,7 +28,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [workspaceName, setWorkspaceName] = useState(currentSubscription.workspaceName);
   const [billingEmail, setBillingEmail] = useState(currentSubscription.billingEmail);
   const [taxId, setTaxId] = useState(currentSubscription.taxId);
-  const [paymentMethod, setPaymentMethod] = useState('Cartão Visa •••• 4242');
   const [errorMsg, setErrorMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -83,7 +82,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           workspaceName: workspaceName.trim(),
           billingEmail: billingEmail.trim(),
           taxId: taxId.trim(),
-          paymentMethod,
         }),
       });
 
@@ -94,38 +92,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       }
       onSuccess(data.subscription, data.invoice);
     } catch {
-      // Offline/static fallback if server unreachable
-      const nextDate = new Date();
-      if (cycle === BillingCycle.ANNUAL) nextDate.setFullYear(nextDate.getFullYear() + 1);
-      else nextDate.setMonth(nextDate.getMonth() + 1);
-
-      const fallbackSub: SubscriptionState = {
-        active: true,
-        planId: selectedPlan.id,
-        cycle,
-        currency,
-        workspaceName: workspaceName.trim(),
-        billingEmail: billingEmail.trim(),
-        taxId: taxId.trim(),
-        paymentMethod,
-        nextBillingDate: nextDate.toISOString().slice(0, 10),
-        autoRenew: true,
-        usedQuotaThisMonth: currentSubscription.usedQuotaThisMonth,
-      };
-      const fallbackInvoice: InvoiceRecord = {
-        id: `inv-${Date.now()}`,
-        number: `PF-2026-${String(Math.floor(Math.random() * 900) + 100)}`,
-        issuedAt: new Date().toISOString().slice(0, 10),
-        planName: selectedPlan.name,
-        cycle,
-        currency,
-        subtotal,
-        vatAmount,
-        total,
-        status: 'Paga',
-        paymentMethod,
-      };
-      onSuccess(fallbackSub, fallbackInvoice);
+      setErrorMsg('O checkout ainda não está ligado a um processador de pagamentos. Não foi cobrado qualquer valor.');
     } finally {
       setSubmitting(false);
     }
@@ -145,7 +112,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               Ativar Subscrição Mensal
             </h2>
             <p className="text-xs text-slate-500">
-              Acesso imediato à consola e emissão automática de fatura
+              O pagamento será processado num checkout seguro quando a integração estiver ativa.
             </p>
           </div>
           <button
@@ -240,24 +207,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               />
             </div>
 
-            <div>
-              <label
-                htmlFor="checkout-payment"
-                className="block text-xs font-semibold text-slate-700 mb-1.5"
-              >
-                Método de Pagamento
-              </label>
-              <select
-                id="checkout-payment"
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
-                className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/30 focus:border-[#1D4ED8]"
-              >
-                <option value="Cartão Visa •••• 4242">Cartão Visa •••• 4242</option>
-                <option value="MB Way / Multibanco">MB Way / Multibanco</option>
-                <option value="Débito Direto SEPA">Débito Direto SEPA</option>
-                <option value="Cartão Corporativo / PIX">Cartão Corporativo / PIX</option>
-              </select>
+            <div className="sm:col-span-2 rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600">
+              O método de pagamento será escolhido no checkout seguro. Os dados do cartão não são recolhidos nesta aplicação.
             </div>
           </div>
 
@@ -331,7 +282,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 disabled={submitting}
                 className="px-5 py-2.5 text-sm font-semibold text-white bg-[#1D4ED8] hover:bg-[#1E40AF] rounded-lg transition-colors disabled:opacity-60 whitespace-nowrap shrink-0 cursor-pointer"
               >
-                {submitting ? 'A processar...' : 'Confirmar e Abrir Consola'}
+                {submitting ? 'A processar...' : 'Continuar para pagamento seguro'}
               </button>
             </div>
           </div>
