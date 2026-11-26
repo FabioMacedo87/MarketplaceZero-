@@ -13,20 +13,20 @@ const plans: Array<{
     key: 'essencial',
     name: 'Essencial',
     audience: 'Para utilização individual',
-    status: 'Oferta e limites em definição',
+    status: '50 análises estáticas por mês · ficheiros até 32 KB · relatórios descarregáveis',
   },
   {
     key: 'profissional',
     name: 'Profissional',
-    audience: 'Para profissionais e pequenas equipas',
-    status: 'Oferta e limites em definição',
+    audience: 'Para utilização profissional regular',
+    status: '250 análises estáticas por mês · ficheiros até 32 KB · relatórios descarregáveis',
     highlighted: true,
   },
   {
     key: 'empresarial',
     name: 'Empresarial',
-    audience: 'Para equipas e organizações',
-    status: 'Oferta e limites em definição',
+    audience: 'Para volumes elevados de análise',
+    status: '1.000 análises estáticas por mês · ficheiros até 32 KB · relatórios descarregáveis',
   },
 ];
 
@@ -48,7 +48,10 @@ export const PricingSection: React.FC<PricingSectionProps> = ({ billingReady, pr
           Planos para diferentes níveis de utilização.
         </h2>
         <p className="mt-3 text-base text-slate-600 leading-relaxed">
-          A cobrança será mensal através de uma página segura do Stripe. A ativação do acesso depende da confirmação do pagamento pelo Stripe.
+          Analisa scripts Windows Batch e PowerShell, recebe recomendações técnicas e descarrega relatórios. O PublicaFix não executa nem publica os scripts.
+        </p>
+        <p className="mt-3 text-sm text-slate-600 leading-relaxed">
+          A conta gratuita inclui 5 análises por mês. Os planos pagos aumentam o limite mensal; cada ficheiro pode ter até 32 KB.
         </p>
       </div>
 
