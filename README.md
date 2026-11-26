@@ -1,6 +1,6 @@
 # PublicaFix
 
-PublicaFix is currently a free beta for static inspection of Windows Batch (.cmd / .bat) and PowerShell (.ps1) scripts.
+PublicaFix provides static inspection of Windows Batch (.cmd / .bat) and PowerShell (.ps1) scripts through a free account and monthly paid plans. Live billing remains disabled until production and tax configuration are complete.
 
 ## What works in this beta
 
@@ -14,7 +14,7 @@ PublicaFix is currently a free beta for static inspection of Windows Batch (.cmd
 
 ## Static analysis limitations
 
-The analysis engine is deterministic and does not execute submitted content. Files are read by the browser and their text is sent to the PublicaFix API for in-memory analysis. The API does not write uploaded scripts to disk or persist them.
+The analysis engine is deterministic and does not execute submitted content. Files are read by the browser and their text is sent to the authenticated PublicaFix API for in-memory analysis. The API does not write uploaded scripts to disk or persist them. The database stores only a monthly counter per account, not script contents or filenames.
 
 Static checks are heuristic. They can produce false positives and false negatives and are not a security certification. A clean report does not prove a script is safe. Review every finding and test scripts in an isolated environment.
 
@@ -30,7 +30,7 @@ Static checks are heuristic. They can produce false positives and false negative
 - The customer portal is used for subscription and payment-method management.
 - The commercial launch switch PUBLICAFIX_LIVE_BILLING_ENABLED must remain false until the plans, inclusions, prices and tax treatment are confirmed. This is a launch control, not a payment test mode.
 
-No live Price objects, webhook endpoint, Stripe secrets, customer portal configuration or production deployment have been created by this code change.
+The live Stripe Prices, webhook endpoint, restricted API key and customer portal configuration are configured separately in the Stripe account. Production deployment and live billing remain gated.
 
 ## Required server environment
 
@@ -39,8 +39,9 @@ See .env.example for the full list.
 Server-only values:
 - SUPABASE_URL
 - SUPABASE_SECRET_KEY
-- STRIPE_SECRET_KEY (must start with sk_live_)
-- STRIPE_WEBHOOK_SECRET\n- STRIPE_BILLING_PORTAL_CONFIGURATION (PublicaFix portal: bpc_1Ug9Gr2VZXUfhutCKuxTaC3c)
+- STRIPE_SECRET_KEY (must start with sk_live_ or rk_live_)
+- STRIPE_WEBHOOK_SECRET
+- STRIPE_BILLING_PORTAL_CONFIGURATION (PublicaFix portal: bpc_1Ug9Gr2VZXUfhutCKuxTaC3c)
 - STRIPE_PRICE_ESSENCIAL
 - STRIPE_PRICE_PROFISSIONAL
 - STRIPE_PRICE_EMPRESARIAL
