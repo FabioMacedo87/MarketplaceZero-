@@ -9,7 +9,7 @@ import { ORIGINAL_ATTACHED_CMD, analyzeAndModernizeScript } from './src/utils/sc
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const app = express();
+export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
@@ -479,4 +479,4 @@ async function startServer() {
   });
 }
 
-startServer();
+if (process.env.VERCEL !== '1') {\n  void startServer();\n}\n\nexport default app;
