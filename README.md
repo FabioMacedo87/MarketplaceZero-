@@ -9,7 +9,8 @@ PublicaFix is currently a free beta for static inspection of Windows Batch (.cmd
 - Review findings with severity, line reference, explanation and remediation.
 - Copy or download a plain-text report.
 - Account registration and login UI backed by Supabase Auth, after environment configuration.
-- Subscription backend prepared for Stripe-hosted monthly Checkout, customer billing portal and signed webhooks. The payment buttons remain disabled until the business plans and all live configuration values are approved and present.
+- Monthly usage limits are enforced server-side: 5 analyses on the free account, 50 on Essencial, 250 on Profissional and 1,000 on Empresarial.
+- Subscription backend prepared for Stripe-hosted monthly Checkout, customer billing portal and signed webhooks. The payment buttons remain disabled until the business plans, tax treatment and production configuration are approved and present.
 
 ## Static analysis limitations
 
