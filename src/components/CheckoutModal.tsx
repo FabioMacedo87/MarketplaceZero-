@@ -51,9 +51,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const selectedPlan = PLANS.find((p) => p.id === planId) ?? PLANS[1];
   const monthlyUnit = getPlanPrice(selectedPlan, cycle, currency);
   const subtotal = cycle === BillingCycle.ANNUAL ? monthlyUnit * 12 : monthlyUnit;
-  const vatRate = currency === CurrencyCode.EUR ? 0.23 : 0;
-  const vatAmount = Number((subtotal * vatRate).toFixed(2));
-  const total = Number((subtotal + vatAmount).toFixed(2));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -246,16 +243,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               </span>
               <span className="font-mono tabular-nums">{formatCurrency(subtotal, currency)}</span>
             </div>
-            <div className="flex items-center justify-between text-slate-600">
-              <span>{currency === CurrencyCode.EUR ? 'IVA (23%)' : 'Impostos incluídos'}</span>
-              <span className="font-mono tabular-nums">{formatCurrency(vatAmount, currency)}</span>
-            </div>
             <div className="pt-2 border-t border-slate-200 flex items-center justify-between font-semibold text-[#0F172A]">
-              <span>Total a faturar hoje</span>
+              <span>{cycle === BillingCycle.ANNUAL ? 'Total anual a pagar' : 'Total mensal recorrente'}</span>
               <span className="font-mono text-base tabular-nums">
-                {formatCurrency(total, currency)}
+                {formatCurrency(subtotal, currency)}
               </span>
             </div>
+            <p className="text-xs text-slate-500">
+              Os impostos aplicáveis serão determinados e apresentados no checkout, de acordo com a situação fiscal e a localização do cliente.
+            </p>
           </div>
 
           {errorMsg && (
