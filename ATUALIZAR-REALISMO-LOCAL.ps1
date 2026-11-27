@@ -56,7 +56,7 @@ if ($remaining.Count -gt 0) {
 Write-Host "Portas 3000 e 24678 livres." -ForegroundColor Green
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$sourceCommit = "3a5429d1b10f6fff89db4dc266a0838be17eb8d4"
+$sourceCommit = "c71ded4ef9b605a7b562f04e26d7699897a77f38"
 $baseUrl = "https://raw.githubusercontent.com/FabioMacedo87/MarketplaceZero-/$sourceCommit"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $stageRoot = Join-Path $env:TEMP "PORTUGAL-LIFE-REALISMO-$stamp"
@@ -117,7 +117,7 @@ if (!$scene.Contains("lucia-locomotion.glb") -or !$scene.Contains("AnimationMixe
 if (!$models.Contains("rear-engine-sports-coupe.glb") -or !$models.Contains("loadRealisticVehicleModel")) {
     throw "A versão descarregada não passou a validação dos veículos."
 }
-if (!$models.Contains("Detailed street facades") -or !$models.Contains("wrought-iron balconies") -or !$models.Contains("Terracotta chimney stacks")) {
+if (!$models.Contains("Detailed street facades") -or !$models.Contains("wrought-iron balconies") -or !$models.Contains("Terracotta chimney stacks") -or !$models.Contains("RoundedBoxGeometry")) {
     throw "A versão descarregada não passou a validação dos novos edifícios."
 }
 if (!$textures.Contains("Procedural PBR asphalt") -or !$scene.Contains("Raised junction surfaces and four-sided zebra crossings") -or !$scene.Contains("const sidewalkWidth = 2.35")) {
@@ -126,7 +126,7 @@ if (!$textures.Contains("Procedural PBR asphalt") -or !$scene.Contains("Raised j
 if (!$professions.Contains("PROFESSION_MISSIONS.taxi.push") -or !$professions.Contains("PROFESSION_MISSIONS.psp.push")) {
     throw "A versão descarregada não contém a nova rotação de missões."
 }
-if (!$engine.Contains("EU QUERO O MEU SECADOR!") -or !$engine.Contains("const templateIndex = (Math.max(1, index) - 1) % templates.length")) {
+if (!$engine.Contains("EU QUERO O MEU SECADOR!") -or !$engine.Contains("Quem é viva sempre aparece!") -or !$engine.Contains("const templateIndex = (Math.max(1, index) - 1) % templates.length")) {
     throw "A versão descarregada não passou a validação das conversas e da rotação de missões."
 }
 if (!$types.Contains("export interface AmbientNpcDialogue") -or !$hud.Contains("hud.ambientNpcDialogue")) {
