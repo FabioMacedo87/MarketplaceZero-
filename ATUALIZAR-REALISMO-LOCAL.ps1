@@ -56,7 +56,7 @@ if ($remaining.Count -gt 0) {
 Write-Host "Portas 3000 e 24678 livres." -ForegroundColor Green
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$sourceCommit = "c0305e516791c34094169e5b9454b2047f85526f"
+$sourceCommit = "1149126278c1069cf2666ba63bd6444d98d5a488"
 $baseUrl = "https://raw.githubusercontent.com/FabioMacedo87/MarketplaceZero-/$sourceCommit"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $stageRoot = Join-Path $env:TEMP "PORTUGAL-LIFE-REALISMO-$stamp"
@@ -129,10 +129,6 @@ try {
     Write-Host "[4/6] A descarregar personagens e automóveis 3D..." -ForegroundColor Cyan
 
     & (Join-Path $projectRoot "INSTALAR-MODELOS-REALISTAS.ps1")
-
-    if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-        throw "O instalador dos modelos terminou com erro."
-    }
 
     Write-Host ""
     Write-Host "[5/6] A compilar PORTUGAL LIFE..." -ForegroundColor Cyan
