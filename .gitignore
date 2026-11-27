@@ -6,3 +6,5 @@ coverage/
 *.log
 .env*
 !.env.example
+public/models/characters/*.glb
+public/models/cars/*.glb
