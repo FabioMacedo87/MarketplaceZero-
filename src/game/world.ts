@@ -1,4 +1,4 @@
-import type { Building, CityTree, ServiceZone } from './types.ts';
+import type { Building, CityTree, LifeLocation, ServiceZone } from './types.ts';
 
 export const WORLD_W = 3200;
 export const WORLD_H = 2400;
@@ -72,6 +72,99 @@ export const SERVICE_ZONES: ServiceZone[] = [
 ];
 
 // Authentic Porto & Gaia Landmark Replicas
+export const LIFE_LOCATIONS: LifeLocation[] = [
+  {
+    id: 'home-porto',
+    kind: 'home',
+    label: 'Apartamento do Porto',
+    description: 'O teu espaço pessoal para descansar, cozinhar e tratar de ti',
+    x: 930,
+    y: 1560,
+    radius: 92,
+    markerColor: '#34D399',
+    icon: '⌂',
+    npcName: 'Amélia Costa',
+    npcRole: 'Vizinha',
+    npcColor: '#34D399',
+    npcShirtColor: '#0F766E',
+  },
+  {
+    id: 'cafe-ribeira',
+    kind: 'cafe',
+    label: 'Café da Ribeira',
+    description: 'Atendimento, refeições e trabalho de barista junto ao Douro',
+    x: 2235,
+    y: 1820,
+    radius: 92,
+    markerColor: '#F59E0B',
+    icon: '☕',
+    npcName: 'Inês Martins',
+    npcRole: 'Barista',
+    npcColor: '#F59E0B',
+    npcShirtColor: '#B45309',
+  },
+  {
+    id: 'mercado-bolhao',
+    kind: 'market',
+    label: 'Mercado do Bolhão',
+    description: 'Compra mantimentos e encontra trabalho no comércio',
+    x: 1985,
+    y: 790,
+    radius: 92,
+    markerColor: '#38BDF8',
+    icon: 'M',
+    npcName: 'Manuel Ferreira',
+    npcRole: 'Comerciante',
+    npcColor: '#38BDF8',
+    npcShirtColor: '#1D4ED8',
+  },
+  {
+    id: 'jardim-cordoaria',
+    kind: 'garden',
+    label: 'Jardim da Cordoaria',
+    description: 'Espaço verde, convívio e trabalhos de jardinagem',
+    x: 855,
+    y: 1160,
+    radius: 88,
+    markerColor: '#4ADE80',
+    icon: '✿',
+    npcName: 'Teresa Rocha',
+    npcRole: 'Jardineira',
+    npcColor: '#4ADE80',
+    npcShirtColor: '#166534',
+  },
+  {
+    id: 'depot-gaia',
+    kind: 'depot',
+    label: 'Ponto Logístico de Gaia',
+    description: 'Recolha e distribuição de encomendas entre as duas margens',
+    x: 2925,
+    y: 1190,
+    radius: 92,
+    markerColor: '#A78BFA',
+    icon: 'D',
+    npcName: 'Rui Carvalho',
+    npcRole: 'Despachante',
+    npcColor: '#A78BFA',
+    npcShirtColor: '#6D28D9',
+  },
+  {
+    id: 'construction-boavista',
+    kind: 'construction',
+    label: 'Estaleiro da Boavista',
+    description: 'Trabalhos de manutenção e construção urbana',
+    x: 855,
+    y: 500,
+    radius: 88,
+    markerColor: '#FB923C',
+    icon: 'C',
+    npcName: 'Carlos Pinto',
+    npcRole: 'Encarregado',
+    npcColor: '#FB923C',
+    npcShirtColor: '#9A3412',
+  },
+];
+
 export const BUILDINGS: Building[] = [
   // Row 1 (Norte: Boavista -> Aliados -> Bolhão -> Gaia Norte)
   {
