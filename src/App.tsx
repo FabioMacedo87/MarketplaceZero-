@@ -101,7 +101,6 @@ export default function App() {
   const interiorOpenRef = useRef(false);
   interiorOpenRef.current = Boolean(interiorLocation);
   const activeActivityRef = useRef(false);
-  activeActivityRef.current = Boolean(hud.activeActivity);
   const lifeOpenRef = useRef(false);
   lifeOpenRef.current = lifeOpen;
   const [controlMode, setControlMode] = useState<ControlMode>('auto');
@@ -109,6 +108,7 @@ export default function App() {
   const [roomCode, setRoomCode] = useState('porto-ribeira');
   const [isTouchViewport, setIsTouchViewport] = useState<boolean>(detectTouchDevice);
   const [hud, setHud] = useState<HudSnapshot>(INITIAL_HUD);
+  activeActivityRef.current = Boolean(hud.activeActivity);
   const [muted, setMuted] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
