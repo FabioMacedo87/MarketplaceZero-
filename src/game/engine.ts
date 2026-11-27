@@ -254,6 +254,10 @@ export class LeonidaEngine {
   private dialogueChapterTitle = '';
   private toastText: string | null = null;
   private toastTimer = 0;
+  private ambientNpcDialogue: import('./types.ts').AmbientNpcDialogue | null = null;
+  private ambientNpcDialogueTimer = 0;
+  private ambientNpcCooldown = 5;
+  private ambientNpcEasterEggUsed = false;
   private missionCounter = 1;
   private autoPromptedMissionId = '';
   private speedAlertCooldown = 0;
@@ -355,6 +359,10 @@ export class LeonidaEngine {
     this.guards = [];
     this.activeActivity = null;
     this.emergencyPings = [];
+    this.ambientNpcDialogue = null;
+    this.ambientNpcDialogueTimer = 0;
+    this.ambientNpcCooldown = 5;
+    this.ambientNpcEasterEggUsed = false;
     this.driftCashAccum = 0;
     this.headlightsOn = true;
     this.completedChapters.clear();
@@ -1962,6 +1970,64 @@ export class LeonidaEngine {
         p.panicTimer = 2;
       }
     }
+
+    // Nearby pedestrians now start short ambient conversations without a button press.
+    if (this.ambientNpcDialogueTimer > 0) {
+      this.ambientNpcDialogueTimer = Math.max(0, this.ambientNpcDialogueTimer - dt);
+      if (this.ambientNpcDialogueTimer === 0) this.ambientNpcDialogue = null;
+    }
+    this.ambientNpcCooldown = Math.max(0, this.ambientNpcCooldown - dt);
+
+    if (
+      this.ambientNpcDialogueTimer <= 0 &&
+      this.ambientNpcCooldown <= 0 &&
+      !this.activeActivity &&
+      !this.player.vehicleId
+    ) {
+      let nearestPedestrian: Pedestrian | null = null;
+      let nearestDistance = 132;
+      for (const pedestrian of this.pedestrians) {
+        const distance = dist(this.player.x, this.player.y, pedestrian.x, pedestrian.y);
+        if (distance < nearestDistance && pedestrian.panicTimer <= 0) {
+          nearestPedestrian = pedestrian;
+          nearestDistance = distance;
+        }
+      }
+
+      if (nearestPedestrian) {
+        const names = ['Tiago', 'Marta', 'Rui', 'Inês', 'Duarte', 'Sofia', 'Nuno', 'Carla', 'Zé', 'Leonor'];
+        const chatter = [
+          'Este trânsito na Baixa está pior do que ontem.',
+          'Alguém sabe se a Ponte Dom Luís está mais livre?',
+          'O café da esquina tem uma meia de leite muito boa.',
+          'Dizem que hoje há música ao vivo nos Aliados.',
+          'Cuidado com a calçada, está escorregadia.',
+          'Vou passar pelo Bolhão antes de ir para casa.',
+          'O Douro está bonito ao fim da tarde.',
+          'Conheces alguma rua aqui perto com estacionamento?',
+          'Hoje a Ribeira está cheia de turistas.',
+          'Ainda vou a tempo de apanhar o metro em São Bento?',
+          'Quem é vivo sempre aparece!',
+          'Esta cidade tem sempre qualquer coisa a acontecer.',
+        ];
+        let text = chatter[Math.floor(Math.random() * chatter.length)];
+
+        // Rare, short cultural Easter egg from the Portuguese web-video saga.
+        if (!this.ambientNpcEasterEggUsed && Math.random() < 0.035) {
+          text = 'EU QUERO O MEU SECADOR!';
+          this.ambientNpcEasterEggUsed = true;
+        }
+
+        const nameIndex = Number(nearestPedestrian.id.replace(/\D/g, '')) || 0;
+        this.ambientNpcDialogue = {
+          speaker: names[nameIndex % names.length],
+          text,
+          color: nearestPedestrian.shirtColor,
+        };
+        this.ambientNpcDialogueTimer = 4.8;
+        this.ambientNpcCooldown = 17 + Math.random() * 12;
+      }
+    }
   }
 
   private triggerRocketExplosion(x: number, y: number, remotePlayers?: Map<string, RemotePlayer>) {
@@ -2252,6 +2318,7 @@ export class LeonidaEngine {
       currentWeapon: this.player.currentWeapon,
       unlockedWeapons: [...this.player.unlockedWeapons],
       toastText: this.toastText,
+      ambientNpcDialogue: this.ambientNpcDialogue,
     };
   }
 }
