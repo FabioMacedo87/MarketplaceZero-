@@ -25,6 +25,7 @@ export function createInitialLifeSimulation(): LifeSimulationSnapshot {
     jobExperience: 0,
     socialProgress: 0,
     studyProgress: 0,
+    completedInteriorTasks: [],
   };
 }
 
@@ -84,6 +85,7 @@ export function advanceLifeSimulation(
     ...current,
     day,
     minuteOfDay,
+    completedInteriorTasks: day > current.day ? [] : [...current.completedInteriorTasks],
     hunger,
     thirst,
     energy,
@@ -268,6 +270,11 @@ export function loadLifeSave(): { life: LifeSimulationSnapshot; cash: number } |
         jobExperience: safeNumber(parsed.life.jobExperience, defaults.jobExperience, 0, 100000),
         socialProgress: safeNumber(parsed.life.socialProgress, defaults.socialProgress, 0, 100),
         studyProgress: safeNumber(parsed.life.studyProgress, defaults.studyProgress, 0, 100000),
+        completedInteriorTasks: Array.isArray(parsed.life.completedInteriorTasks)
+          ? parsed.life.completedInteriorTasks
+              .filter((id): id is string => typeof id === 'string' && /^[a-z0-9-]{2,64}$/.test(id))
+              .slice(0, 80)
+          : [],
       },
       cash: safeNumber(parsed.cash, 650, 0, 100000000),
     };
@@ -279,7 +286,7 @@ export function loadLifeSave(): { life: LifeSimulationSnapshot; cash: number } |
 export function saveLifeSave(life: LifeSimulationSnapshot, cash: number): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, life, cash }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, life, cash }));
   } catch {
     // Storage can be unavailable in private browsing or when device storage is full.
   }

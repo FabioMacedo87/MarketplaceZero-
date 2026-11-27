@@ -59,6 +59,8 @@ export interface LifeSimulationSnapshot {
   jobExperience: number;
   socialProgress: number;
   studyProgress: number;
+  /** Interior activities already completed on the current in-game day. */
+  completedInteriorTasks: string[];
 }
 
 export type MiniGameKind = 'cargo_seal' | 'ledger_trade' | 'medical_triage' | 'psp_inspection' | 'conversation';

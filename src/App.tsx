@@ -3,6 +3,7 @@ import { GameHud } from './components/GameHud.tsx';
 import { ActivityModal } from './components/ActivityModal.tsx';
 import { CareerModal } from './components/CareerModal.tsx';
 import { LifeSimulationModal } from './components/LifeSimulationModal.tsx';
+import { InteriorScene } from './components/InteriorScene.tsx';
 import { GameModals } from './components/GameModals.tsx';
 import { MobileControls } from './components/MobileControls.tsx';
 import { PortoRealModal } from './components/PortoRealModal.tsx';
@@ -96,6 +97,9 @@ export default function App() {
   const [careerOpen, setCareerOpen] = useState(false);
   const [lifeOpen, setLifeOpen] = useState(false);
   const [activeLifeLocation, setActiveLifeLocation] = useState<LifeLocation | null>(null);
+  const [interiorLocation, setInteriorLocation] = useState<LifeLocation | null>(null);
+  const interiorOpenRef = useRef(false);
+  interiorOpenRef.current = Boolean(interiorLocation);
   const activeActivityRef = useRef(false);
   activeActivityRef.current = Boolean(hud.activeActivity);
   const lifeOpenRef = useRef(false);
@@ -223,7 +227,7 @@ export default function App() {
       target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isTyping(e.target)) return;
+      if (isTyping(e.target) || interiorOpenRef.current) return;
 
       if (gameStateRef.current !== 'PLAYING') {
         if (
@@ -358,6 +362,7 @@ export default function App() {
 
       if (
         gameStateRef.current === 'PLAYING' &&
+        !interiorOpenRef.current &&
         !realExplorerOpenRef.current &&
         !storyOpenRef.current &&
         !lifeOpenRef.current &&
@@ -397,7 +402,9 @@ export default function App() {
         }
       }
 
-      scene3d.updateAndRender(engine, remotePlayers, dt, engine.cameraMode);
+      if (!interiorOpenRef.current) {
+        scene3d.updateAndRender(engine, remotePlayers, dt, engine.cameraMode);
+      }
 
       hudTimer += dt;
       if (hudTimer >= 0.08) {
@@ -472,6 +479,7 @@ export default function App() {
     <div className="relative w-screen h-[100dvh] overflow-hidden bg-[#090D16] select-none touch-none">
       <div
         ref={mountRef}
+        style={{ opacity: interiorLocation ? 0 : 1, pointerEvents: interiorLocation ? 'none' : 'auto' }}
         onContextMenu={(e) => e.preventDefault()}
         onMouseMove={(e) => {
           inputRef.current.mouseX = e.clientX;
@@ -544,7 +552,7 @@ export default function App() {
         className="w-full h-full cursor-crosshair"
       />
 
-      {gameState !== 'TITLE_MENU' && (
+      {gameState !== 'TITLE_MENU' && !interiorLocation && (
         <GameHud
           hud={hud}
           isMobile={effectiveMobile}
@@ -629,7 +637,7 @@ export default function App() {
         />
       )}
 
-      {gameState === 'PLAYING' && effectiveMobile && !realExplorerOpen && !storyOpen && (
+      {gameState === 'PLAYING' && effectiveMobile && !interiorLocation && !realExplorerOpen && !storyOpen && (
         <MobileControls
           inVehicle={Boolean(hud.vehicleName)}
           canEnterVehicle={Boolean(hud.nearVehicleName)}
@@ -729,6 +737,12 @@ export default function App() {
         life={hud.life}
         cash={hud.cash}
         location={activeLifeLocation}
+        onEnterInterior={() => {
+          if (!activeLifeLocation) return;
+          setLifeOpen(false);
+          setInteriorLocation(activeLifeLocation);
+          setActiveLifeLocation(null);
+        }}
         onTalkToNpc={() => {
           const location = activeLifeLocation;
           setLifeOpen(false);
@@ -772,6 +786,23 @@ export default function App() {
           if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
         }}
       />
+
+      {interiorLocation && gameState === 'PLAYING' && (
+        <InteriorScene
+          location={interiorLocation}
+          character={character}
+          job={hud.life.job}
+          isMobile={effectiveMobile}
+          completedTaskIds={hud.life.completedInteriorTasks ?? []}
+          onClose={() => setInteriorLocation(null)}
+          onCompleteTask={(taskId) => {
+            const result = engineRef.current?.completeInteriorTask(interiorLocation.kind, taskId)
+              ?? { ok: false, message: 'O motor do jogo não está disponível.' };
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+            return result;
+          }}
+        />
+      )}
     </div>
   );
 }

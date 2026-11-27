@@ -36,6 +36,7 @@ import type {
   LifeSimulationSnapshot,
 } from './types.ts';
 import { WEAPONS, WEAPON_ORDER } from './weapons.ts';
+import { getInteriorTask } from './interiorTasks.ts';
 import {
   advanceLifeSimulation,
   createInitialLifeSimulation,
@@ -535,6 +536,78 @@ export class LeonidaEngine {
     saveLifeSave(this.life, this.player.cash);
     this.showToast(result.message, 3.2);
     return result;
+  }
+
+  public completeInteriorTask(
+    locationKind: LifeLocationKind,
+    taskId: string,
+  ): { ok: boolean; message: string } {
+    if (this.player.vehicleId) {
+      return { ok: false, message: 'Sai do veículo antes de executar uma tarefa.' };
+    }
+    const currentLocation = this.findNearestLifeLocation(150);
+    if (!currentLocation || currentLocation.kind !== locationKind) {
+      return { ok: false, message: 'Não estás no local correspondente a esta tarefa.' };
+    }
+    const task = getInteriorTask(locationKind, taskId);
+    if (!task) {
+      return { ok: false, message: 'Esta tarefa não está disponível neste espaço.' };
+    }
+    if (this.life.completedInteriorTasks.includes(task.id)) {
+      return { ok: false, message: 'Esta tarefa já foi concluída hoje. Volta amanhã.' };
+    }
+    if (task.requiredJob && this.life.job !== task.requiredJob) {
+      const jobNames: Record<LifeJobId, string> = {
+        barista: 'empregado de café',
+        retail: 'comércio',
+        courier: 'estafeta',
+        gardener: 'jardinagem',
+        construction: 'construção',
+      };
+      return {
+        ok: false,
+        message: 'Esta tarefa exige a profissão de ' + jobNames[task.requiredJob] + '.',
+      };
+    }
+    if (task.energyCost > 0 && this.life.energy < task.energyCost) {
+      return { ok: false, message: 'Estás demasiado cansado para concluir esta tarefa. Descansa primeiro.' };
+    }
+
+    let nextLife = this.life;
+    let nextCash = this.player.cash;
+    if (task.lifeAction) {
+      const result = performLifeAction(this.life, this.player.cash, task.lifeAction, locationKind);
+      if (!result.ok) {
+        this.showToast(result.message, 3);
+        return { ok: false, message: result.message };
+      }
+      nextLife = result.life;
+      nextCash = result.cash;
+    } else {
+      nextLife = advanceLifeSimulation(this.life, task.durationMinutes);
+      nextLife = {
+        ...nextLife,
+        energy: clamp(nextLife.energy - task.energyCost),
+        mood: clamp(nextLife.mood + 2),
+        jobExperience: task.requiredJob ? nextLife.jobExperience + 1 : nextLife.jobExperience,
+      };
+      nextCash += task.cashReward;
+    }
+
+    // A task is only committed after its gameplay effects have succeeded.
+    nextLife = {
+      ...nextLife,
+      completedInteriorTasks: [...nextLife.completedInteriorTasks, task.id],
+    };
+    this.life = nextLife;
+    this.player.cash = nextCash;
+    saveLifeSave(this.life, this.player.cash);
+    soundEngine.playPickup();
+    this.showToast(task.successMessage + (task.cashReward > 0 ? ' +' + task.cashReward + ' €.' : ''), 3.2);
+    return {
+      ok: true,
+      message: task.successMessage + (task.cashReward > 0 ? ' Recebeste ' + task.cashReward + ' €.' : ''),
+    };
   }
 
   public toggleDuty() {
