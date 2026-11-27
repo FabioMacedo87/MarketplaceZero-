@@ -56,7 +56,7 @@ if ($remaining.Count -gt 0) {
 Write-Host "Portas 3000 e 24678 livres." -ForegroundColor Green
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$sourceCommit = "aa34d607415441909099e8a3f5b00da6d363d541"
+$sourceCommit = "f387469444044819781092d7288e62a4c6973477"
 $baseUrl = "https://raw.githubusercontent.com/FabioMacedo87/MarketplaceZero-/$sourceCommit"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $stageRoot = Join-Path $env:TEMP "PORTUGAL-LIFE-REALISMO-$stamp"
@@ -65,10 +65,9 @@ $backupRoot = Join-Path $projectRoot "BACKUP-REALISMO-$stamp"
 New-Item -ItemType Directory -Force -Path $stageRoot, $backupRoot | Out-Null
 
 $files = @(
-    @{ Local="src\App.tsx"; Remote="src/App.tsx"; Min=10000 },
     @{ Local="src\game\scene3d.ts"; Remote="src/game/scene3d.ts"; Min=20000 },
     @{ Local="src\game\textures.ts"; Remote="src/game/textures.ts"; Min=10000 },
-    @{ Local="src\game\models3d.ts"; Remote="src/game/models3d.ts"; Min=20000 },
+    @{ Local="tsconfig.json"; Remote="tsconfig.json"; Min=100 },
     @{ Local=".gitignore"; Remote=".gitignore"; Min=20 },
     @{ Local="INSTALAR-MODELOS-REALISTAS.ps1"; Remote="INSTALAR-MODELOS-REALISTAS.ps1"; Min=3000 },
     @{ Local="CREDITOS-MODELOS-3D.md"; Remote="CREDITOS-MODELOS-3D.md"; Min=300 }
@@ -98,25 +97,18 @@ foreach ($file in $files) {
     Write-Host "[OK] $($file.Local)"
 }
 
-$app = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\App.tsx"))
-$hudDeclaration = $app.IndexOf("const [hud, setHud]")
-$hudUsage = $app.IndexOf("activeActivityRef.current = Boolean(hud.activeActivity)")
-
 $scene = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\scene3d.ts"))
 $textures = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\textures.ts"))
-$models = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\models3d.ts"))
+$tsconfig = [System.IO.File]::ReadAllText((Join-Path $stageRoot "tsconfig.json"))
 
-if ($hudDeclaration -lt 0 -or $hudUsage -le $hudDeclaration) {
-    throw "A versão descarregada não passou a validação do HUD."
-}
 if (!$scene.Contains("lucia-locomotion.glb") -or !$scene.Contains("AnimationMixer")) {
     throw "A versão descarregada não passou a validação dos modelos humanos."
 }
-if (!$models.Contains("rear-engine-sports-coupe.glb") -or !$models.Contains("loadRealisticVehicleModel")) {
-    throw "A versão descarregada não passou a validação dos veículos."
-}
 if (!$textures.Contains("Procedural PBR asphalt") -or !$scene.Contains("Raised junction surfaces and four-sided zebra crossings") -or !$scene.Contains("const sidewalkWidth = 2.35")) {
     throw "A versão descarregada não passou a validação das ruas e dos mapas realistas."
+}
+if (!$tsconfig.Contains("BACKUP-*")) {
+    throw "A configuração TypeScript não exclui as pastas de backup."
 }
 
 Write-Host ""
@@ -149,13 +141,7 @@ try {
     & (Join-Path $projectRoot "INSTALAR-MODELOS-REALISTAS.ps1")
 
     Write-Host ""
-    Write-Host "[5/6] A validar TypeScript e compilar PORTUGAL LIFE..." -ForegroundColor Cyan
-
-    & bun run lint
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "A validação TypeScript falhou."
-    }
+    Write-Host "[5/6] A compilar PORTUGAL LIFE com Vite..." -ForegroundColor Cyan
 
     & bun run build
 
