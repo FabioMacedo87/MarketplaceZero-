@@ -25,9 +25,7 @@ function makeCanvasTexture(text: string, background: string, foreground: string)
   const context = canvas.getContext('2d');
   if (context) {
     context.fillStyle = background;
-    context.beginPath();
-    context.roundRect(12, 12, 488, 104, 22);
-    context.fill();
+    context.fillRect(12, 12, 488, 104);
     context.strokeStyle = 'rgba(255,255,255,0.35)';
     context.lineWidth = 4;
     context.stroke();
@@ -79,8 +77,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [localCompleted, setLocalCompleted] = useState<string[]>([]);
   const [sceneReady, setSceneReady] = useState(false);
+  const completedRef = useRef<string[]>([]);
 
   activeTaskRef.current = activeTask;
+  completedRef.current = [...completedTaskIds, ...localCompleted];
   nearTaskRef.current = nearTaskId;
   const tasks = INTERIOR_TASKS[location.kind];
   const completed = new Set([...completedTaskIds, ...localCompleted]);
@@ -265,7 +265,11 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
 
       // Back windows, frames and a simple sill.
       addBox(scene, -4.4, 2.55, -6.78, 3.7, 2.15, 0.06, 0x5b514a);
-      addBox(scene, -4.4, 2.55, -6.72, 3.35, 1.82, 0x83b8cc, 0.18, 0.08);
+      const windowGeometry = new THREE.PlaneGeometry(3.35, 1.82);
+      const windowPane = new THREE.Mesh(windowGeometry, glassMaterial);
+      windowPane.position.set(-4.4, 2.55, -6.72);
+      ownedGeometries.push(windowGeometry);
+      scene.add(windowPane);
       addBox(scene, -4.4, 2.55, -6.65, 0.08, 1.9, 0.08, 0xe7e2d9);
       addBox(scene, -4.4, 2.55, -6.65, 3.5, 0.08, 0.08, 0xe7e2d9);
       addBox(scene, -6.1, 2.55, -6.65, 0.07, 1.9, 0.08, 0xe7e2d9);
@@ -378,6 +382,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
         ringGeometry.rotateX(Math.PI / 2);
         const ring = new THREE.Mesh(ringGeometry, ringMaterial);
         ring.userData.taskRing = true;
+        ring.userData.taskId = task.id;
         ring.position.set(task.x, 0.12, task.z);
         scene.add(ring);
         ownedGeometries.push(ringGeometry);
@@ -517,9 +522,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
 
         for (const child of scene.children) {
           if (child.userData.taskRing && child instanceof THREE.Mesh) {
-            child.rotation.z += delta * 0.45;
+            child.rotation.y += delta * 0.45;
             const material = child.material as THREE.MeshBasicMaterial;
             material.opacity = 0.65 + Math.sin(elapsed * 2.1) * 0.2;
+            material.color.setHex(completedRef.current.includes(String(child.userData.taskId)) ? 0x64748b : 0xfbbf24);
           }
         }
 
@@ -529,13 +535,14 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
           let nearest: InteriorTaskDefinition | null = null;
           let nearestDistance = 1.85;
           for (const task of tasks) {
+            if (completedRef.current.includes(task.id)) continue;
             const distance = Math.hypot(position.x - task.x, position.z - task.z);
             if (distance < nearestDistance) {
               nearest = task;
               nearestDistance = distance;
             }
           }
-          updatePrompt(nearest && !completed.has(nearest.id) ? nearest.id : null);
+          updatePrompt(nearest ? nearest.id : null);
         }
         renderer.render(scene, camera);
       };
