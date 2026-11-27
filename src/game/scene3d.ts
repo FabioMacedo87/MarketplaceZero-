@@ -30,13 +30,14 @@ import {
   createWaterNormalTexture,
 } from './textures.ts';
 import { PROFESSIONS } from './professions.ts';
-import type { CameraMode, CharacterId, ProfessionId, RemotePlayer } from './types.ts';
+import type { CameraMode, CharacterId, LifeLocation, ProfessionId, RemotePlayer } from './types.ts';
 import type { LeonidaEngine } from './engine.ts';
 import {
   BRIDGE_YS,
   BUILDINGS,
   CITY_TREES,
   HORIZONTAL_ROADS,
+  LIFE_LOCATIONS,
   RIVER_END_X,
   RIVER_START_X,
   ROAD_WIDTH,
@@ -131,6 +132,11 @@ export class LeonidaScene3D {
   private pedRigs = new Map<string, CharacterRig>();
   private guardRigs = new Map<string, CharacterRig>();
   private pickupMeshes = new Map<string, THREE.Group>();
+  private lifeLocationMarkers = new Map<
+    string,
+    { group: THREE.Group; ring: THREE.Mesh; ringMaterial: THREE.MeshBasicMaterial; orb: THREE.Mesh }
+  >();
+  private lifeLocationNpcs = new Map<string, CharacterRig>();
   private remoteRigs = new Map<string, RemoteRenderEntry>();
   private playerRig: CharacterRig;
   private playerCharacter: CharacterId;
@@ -247,6 +253,8 @@ export class LeonidaScene3D {
     this.buildCityTreesAndStreetLamps();
     this.buildRabeloBoatsAndTram();
     this.buildServiceAndMissionMarkers();
+    this.buildLifeLocationMarkers();
+    this.buildLifeLocationNpcs();
 
     this.playerRig = createCharacterRig(
       true,
@@ -1024,6 +1032,159 @@ export class LeonidaScene3D {
     );
   }
 
+  private buildLifeLocationMarkers() {
+    for (const location of LIFE_LOCATIONS) {
+      const group = new THREE.Group();
+      const markerColor = new THREE.Color(location.markerColor);
+
+      const ringGeo = new THREE.RingGeometry(1.45, 1.9, 36);
+      ringGeo.rotateX(-Math.PI / 2);
+      const ringMaterial = new THREE.MeshBasicMaterial({
+        color: markerColor,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.66,
+        depthWrite: false,
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMaterial);
+      ring.position.y = 0.15;
+      group.add(ring);
+
+      const baseGeo = new THREE.CylinderGeometry(0.34, 0.46, 0.24, 12);
+      const baseMat = new THREE.MeshStandardMaterial({
+        color: 0x172033,
+        metalness: 0.72,
+        roughness: 0.32,
+      });
+      const base = new THREE.Mesh(baseGeo, baseMat);
+      base.position.y = 0.23;
+      group.add(base);
+
+      const postGeo = new THREE.CylinderGeometry(0.07, 0.1, 1.3, 8);
+      const postMat = new THREE.MeshStandardMaterial({
+        color: markerColor,
+        emissive: markerColor,
+        emissiveIntensity: 0.32,
+        metalness: 0.45,
+        roughness: 0.34,
+      });
+      const post = new THREE.Mesh(postGeo, postMat);
+      post.position.y = 0.98;
+      group.add(post);
+
+      const orbGeo = new THREE.SphereGeometry(0.42, 16, 12);
+      const orbMat = new THREE.MeshStandardMaterial({
+        color: markerColor,
+        emissive: markerColor,
+        emissiveIntensity: 1.25,
+        roughness: 0.2,
+        metalness: 0.12,
+      });
+      const orb = new THREE.Mesh(orbGeo, orbMat);
+      orb.position.y = 1.78;
+      group.add(orb);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'rgba(8, 13, 24, 0.88)';
+        ctx.beginPath();
+        ctx.roundRect(8, 8, 496, 112, 22);
+        ctx.fill();
+        ctx.strokeStyle = location.markerColor;
+        ctx.lineWidth = 5;
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '600 42px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(location.label.toUpperCase(), 256, 66, 462);
+      }
+      const labelTexture = new THREE.CanvasTexture(canvas);
+      labelTexture.colorSpace = THREE.SRGBColorSpace;
+      const labelMaterial = new THREE.SpriteMaterial({
+        map: labelTexture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+      });
+      const label = new THREE.Sprite(labelMaterial);
+      label.position.set(0, 3.35, 0);
+      label.scale.set(5.2, 1.3, 1);
+      group.add(label);
+
+      group.position.set(location.x * WORLD_SCALE, 0, location.y * WORLD_SCALE);
+      this.scene.add(group);
+      this.lifeLocationMarkers.set(location.id, { group, ring, ringMaterial, orb });
+
+      this.disposables.push(
+        ringGeo,
+        ringMaterial,
+        baseGeo,
+        baseMat,
+        postGeo,
+        postMat,
+        orbGeo,
+        orbMat,
+        labelTexture,
+        labelMaterial,
+      );
+    }
+  }
+
+  private buildLifeLocationNpcs() {
+    for (const location of LIFE_LOCATIONS) {
+      const rig = createCharacterRig(
+        false,
+        location.npcShirtColor,
+        this.shadowTex,
+        !this.isSoftwareGl,
+        'pistol',
+        location.npcName,
+        location.npcColor,
+      );
+      this.lifeLocationNpcs.set(location.id, rig);
+      this.scene.add(rig.group);
+    }
+  }
+
+  private syncLifeLocationMarkers(engine: LeonidaEngine, nowSec: number) {
+    for (const location of LIFE_LOCATIONS) {
+      const marker = this.lifeLocationMarkers.get(location.id);
+      if (!marker) continue;
+      const distance = Math.hypot(
+        engine.player.x - location.x,
+        engine.player.y - location.y,
+      );
+      const active = distance <= location.radius;
+      const pulse = 1 + Math.sin(nowSec * 3.2) * 0.08;
+      marker.ring.scale.setScalar(active ? pulse * 1.18 : pulse);
+      marker.ringMaterial.opacity = active ? 0.96 : 0.58;
+      marker.orb.scale.setScalar(active ? 1.22 : 1);
+    }
+  }
+
+  private syncLifeLocationNpcs(engine: LeonidaEngine, nowSec: number) {
+    LIFE_LOCATIONS.forEach((location, index) => {
+      const rig = this.lifeLocationNpcs.get(location.id);
+      if (!rig) return;
+      const offset = location.kind === 'cafe' || location.kind === 'market' ? 22 : 18;
+      rig.group.position.set(
+        (location.x + offset) * WORLD_SCALE,
+        0,
+        (location.y + 14) * WORLD_SCALE,
+      );
+      rig.group.rotation.y = -Math.atan2(
+        engine.player.y - (location.y + 14),
+        engine.player.x - (location.x + offset),
+      );
+      animateCharacterRig(rig, 0, false, false, nowSec, index * 1.65);
+    });
+  }
+
   public syncCharacterModel(character: CharacterId, profession: ProfessionId = 'taxi') {
     if (this.playerCharacter !== character) {
       this.playerCharacter = character;
@@ -1116,6 +1277,8 @@ export class LeonidaScene3D {
     this.syncVehicles(engine, dt);
     this.syncPlayer(engine, nowSec);
     this.syncPedestrians(engine, nowSec);
+    this.syncLifeLocationMarkers(engine, nowSec);
+    this.syncLifeLocationNpcs(engine, nowSec);
     this.syncGuards(engine, nowSec);
     this.syncRemotePlayers(remotePlayers, dt, nowSec);
     this.syncPickups(engine, nowSec);
