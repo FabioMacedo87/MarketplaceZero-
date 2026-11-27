@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { GameHud } from './components/GameHud.tsx';
+import { ActivityModal } from './components/ActivityModal.tsx';
 import { CareerModal } from './components/CareerModal.tsx';
 import { LifeSimulationModal } from './components/LifeSimulationModal.tsx';
 import { GameModals } from './components/GameModals.tsx';
@@ -21,6 +22,7 @@ import type {
   ProfessionId,
   LifeAction,
   LifeJobId,
+  LifeLocation,
 } from './game/types.ts';
 import { createInitialLifeSimulation } from './game/lifeSimulation.ts';
 import { WEAPON_ORDER } from './game/weapons.ts';
@@ -41,6 +43,8 @@ const INITIAL_HUD: HudSnapshot = {
   nearServiceZone: null,
   nearBuildingId: null,
   nearBuildingName: null,
+  nearLifeLocation: null,
+  canInteractLifeLocation: false,
   missionTitle: 'Explora o Porto e constrói a tua vida',
   missionObjective: 'Escolhe como queres viver: trabalha, explora e conhece a cidade.',
   missionReward: 0,
@@ -91,6 +95,9 @@ export default function App() {
   const [profession, setProfession] = useState<ProfessionId>('merchant');
   const [careerOpen, setCareerOpen] = useState(false);
   const [lifeOpen, setLifeOpen] = useState(false);
+  const [activeLifeLocation, setActiveLifeLocation] = useState<LifeLocation | null>(null);
+  const activeActivityRef = useRef(false);
+  activeActivityRef.current = Boolean(hud.activeActivity);
   const lifeOpenRef = useRef(false);
   lifeOpenRef.current = lifeOpen;
   const [controlMode, setControlMode] = useState<ControlMode>('auto');
@@ -242,6 +249,22 @@ export default function App() {
         return;
       }
 
+      if (lifeOpenRef.current) {
+        if (e.key === 'Escape') {
+          setLifeOpen(false);
+          setActiveLifeLocation(null);
+        }
+        return;
+      }
+
+      if (activeActivityRef.current) {
+        if (e.key === 'Escape') {
+          engineRef.current?.cancelLandmarkActivity();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }
+        return;
+      }
+
       const code = e.code;
       if (code === 'KeyW' || code === 'ArrowUp') inputRef.current.up = true;
       if (code === 'KeyS' || code === 'ArrowDown') inputRef.current.down = true;
@@ -266,6 +289,16 @@ export default function App() {
         if (snap?.activeDialogue) {
           e.preventDefault();
           engineRef.current?.advanceDialogue();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }
+      }
+      if (code === 'KeyG') {
+        const snap = engineRef.current?.getHudSnapshot();
+        if (snap?.canInteractLifeLocation && snap.nearLifeLocation) {
+          setActiveLifeLocation(snap.nearLifeLocation);
+          setLifeOpen(true);
+        } else if (snap?.canInteractMission) {
+          engineRef.current?.openLandmarkActivity();
           if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
         }
       }
@@ -327,7 +360,8 @@ export default function App() {
         gameStateRef.current === 'PLAYING' &&
         !realExplorerOpenRef.current &&
         !storyOpenRef.current &&
-        !lifeOpenRef.current
+        !lifeOpenRef.current &&
+        !activeActivityRef.current
       ) {
         const aimWorld2D =
           !effectiveMobileRef.current && inputRef.current.mouseActive
@@ -530,7 +564,10 @@ export default function App() {
             if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
           }}
           onOpenCareer={() => setCareerOpen(true)}
-          onOpenLife={() => setLifeOpen(true)}
+          onOpenLife={(location) => {
+            setActiveLifeLocation(location);
+            setLifeOpen(true);
+          }}
           onOpenGarage={() => setGameState('GARAGE')}
           onOpenStory={() => setStoryOpen(true)}
           onInteractMission={() => {
@@ -556,6 +593,24 @@ export default function App() {
             if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
           }}
           onSendChat={(txt) => mpRef.current?.sendChat(txt)}
+        />
+      )}
+
+      {gameState === 'PLAYING' && hud.activeActivity && !lifeOpen && !storyOpen && !realExplorerOpen && (
+        <ActivityModal
+          activity={hud.activeActivity}
+          onChooseOption={(index) => {
+            engineRef.current?.chooseNpcOption(index);
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
+          onComplete={(performanceMul, pspDecision) => {
+            engineRef.current?.completeLandmarkActivity(performanceMul, pspDecision);
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
+          onCancel={() => {
+            engineRef.current?.cancelLandmarkActivity();
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
         />
       )}
 
@@ -673,9 +728,13 @@ export default function App() {
         open={lifeOpen}
         life={hud.life}
         cash={hud.cash}
-        onClose={() => setLifeOpen(false)}
+        location={activeLifeLocation}
+        onClose={() => {
+          setLifeOpen(false);
+          setActiveLifeLocation(null);
+        }}
         onAction={(action: LifeAction) => {
-          engineRef.current?.performLifeAction(action);
+          engineRef.current?.performLifeAction(action, activeLifeLocation?.kind ?? null);
           if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
         }}
         onSelectJob={(job: LifeJobId) => {
