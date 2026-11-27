@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { GameHud } from './components/GameHud.tsx';
+import { CareerModal } from './components/CareerModal.tsx';
+import { LifeSimulationModal } from './components/LifeSimulationModal.tsx';
 import { GameModals } from './components/GameModals.tsx';
 import { MobileControls } from './components/MobileControls.tsx';
 import { PortoRealModal } from './components/PortoRealModal.tsx';
@@ -16,11 +18,16 @@ import type {
   HudSnapshot,
   InputState,
   LeaderboardEntry,
+  ProfessionId,
+  LifeAction,
+  LifeJobId,
 } from './game/types.ts';
+import { createInitialLifeSimulation } from './game/lifeSimulation.ts';
 import { WEAPON_ORDER } from './game/weapons.ts';
 
 const INITIAL_HUD: HudSnapshot = {
-  cash: 500,
+  cash: 650,
+  life: createInitialLifeSimulation(),
   hp: 100,
   maxHp: 100,
   armor: 40,
@@ -34,21 +41,32 @@ const INITIAL_HUD: HudSnapshot = {
   nearServiceZone: null,
   nearBuildingId: null,
   nearBuildingName: null,
-  missionTitle: 'Operação São Bento → Palácio da Bolsa',
-  missionObjective: 'Entre na Estação de São Bento para simular o acesso ao Átrio dos Azulejos.',
-  missionReward: 650,
-  missionBuilding: 'Estação de São Bento',
+  missionTitle: 'Explora o Porto e constrói a tua vida',
+  missionObjective: 'Escolhe como queres viver: trabalha, explora e conhece a cidade.',
+  missionReward: 0,
+  missionBuilding: 'Porto',
   missionProgress: 0,
   missionSimulating: false,
   gpsDistMeters: 0,
   headlightsOn: true,
+  sirenActive: false,
+  profession: 'merchant',
+  professionTitle: 'Empresário',
+  professionColor: '#A855F7',
+  onDuty: false,
+  drivingPoints: 12,
+  reputation: 10,
+  canInteractMission: false,
+  activeActivity: null,
+  nearPspTarget: null,
+  emergencyPings: [],
   storyChapter: 1,
   completedChapters: [],
   activeDialogue: null,
   comboMultiplier: 1,
   missionsCompleted: 0,
   maxStarsReached: 0,
-  timeOfDayLabel: 'Entardecer no Douro',
+  timeOfDayLabel: 'Manhã no Porto',
   cameraMode: 'chase',
   currentWeapon: 'pistol',
   unlockedWeapons: ['pistol'],
@@ -70,6 +88,11 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState>('TITLE_MENU');
   const gameStateRef = useRef<GameState>('TITLE_MENU');
   const [character, setCharacter] = useState<CharacterId>('lucia');
+  const [profession, setProfession] = useState<ProfessionId>('merchant');
+  const [careerOpen, setCareerOpen] = useState(false);
+  const [lifeOpen, setLifeOpen] = useState(false);
+  const lifeOpenRef = useRef(false);
+  lifeOpenRef.current = lifeOpen;
   const [controlMode, setControlMode] = useState<ControlMode>('auto');
   const [playerCallsign, setPlayerCallsign] = useState('Piloto do Porto');
   const [roomCode, setRoomCode] = useState('porto-ribeira');
@@ -126,6 +149,7 @@ export default function App() {
   if (!engineRef.current) {
     engineRef.current = new LeonidaEngine(
       character,
+      profession,
       () => setGameState('GAME_OVER'),
       () => setGameState('GARAGE'),
     );
@@ -302,7 +326,8 @@ export default function App() {
       if (
         gameStateRef.current === 'PLAYING' &&
         !realExplorerOpenRef.current &&
-        !storyOpenRef.current
+        !storyOpenRef.current &&
+        !lifeOpenRef.current
       ) {
         const aimWorld2D =
           !effectiveMobileRef.current && inputRef.current.mouseActive
@@ -361,7 +386,7 @@ export default function App() {
   }, []);
 
   const handleStartGame = () => {
-    engineRef.current?.reset(character);
+    engineRef.current?.reset(character, profession);
     scene3dRef.current?.syncCharacterModel(character);
     mpRef.current?.connect(playerCallsign, roomCode, character);
     if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
@@ -504,8 +529,22 @@ export default function App() {
             engineRef.current?.cycleCameraMode();
             if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
           }}
+          onOpenCareer={() => setCareerOpen(true)}
+          onOpenLife={() => setLifeOpen(true)}
           onOpenGarage={() => setGameState('GARAGE')}
           onOpenStory={() => setStoryOpen(true)}
+          onInteractMission={() => {
+            engineRef.current?.openLandmarkActivity();
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
+          onPspInspect={() => {
+            engineRef.current?.openPspInspection();
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
+          onCall112={() => {
+            engineRef.current?.callEmergency112();
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
           onOpenRealExplorer={(buildingId) => {
             setRealExplorerBuildingId(buildingId ?? hud.nearBuildingId ?? null);
             setRealExplorerOpen(true);
@@ -573,6 +612,7 @@ export default function App() {
       <GameModals
         gameState={gameState}
         character={character}
+        profession={profession}
         controlMode={controlMode}
         effectiveMobile={effectiveMobile}
         playerCallsign={playerCallsign}
@@ -583,6 +623,7 @@ export default function App() {
         onChangeCallsign={setPlayerCallsign}
         onChangeRoomCode={setRoomCode}
         onSelectCharacter={setCharacter}
+        onSelectProfession={setProfession}
         onSelectControlMode={setControlMode}
         onStartGame={handleStartGame}
         onResume={() => setGameState('PLAYING')}
@@ -603,6 +644,44 @@ export default function App() {
           if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
         }}
         onSaveScore={handleSaveScore}
+      />
+
+      <CareerModal
+        open={careerOpen}
+        hud={hud}
+        onClose={() => setCareerOpen(false)}
+        onSelectProfession={(nextProfession) => {
+          setProfession(nextProfession);
+          engineRef.current?.setProfession(nextProfession);
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onToggleDuty={() => {
+          engineRef.current?.toggleDuty();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onSpawnServiceVehicle={() => {
+          engineRef.current?.spawnProfessionVehicle();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onCall112={() => {
+          engineRef.current?.callEmergency112();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+      />
+
+      <LifeSimulationModal
+        open={lifeOpen}
+        life={hud.life}
+        cash={hud.cash}
+        onClose={() => setLifeOpen(false)}
+        onAction={(action: LifeAction) => {
+          engineRef.current?.performLifeAction(action);
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onSelectJob={(job: LifeJobId) => {
+          engineRef.current?.setLifeJob(job);
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
       />
 
       <PortoRealModal
