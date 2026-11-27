@@ -56,7 +56,7 @@ if ($remaining.Count -gt 0) {
 Write-Host "Portas 3000 e 24678 livres." -ForegroundColor Green
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$sourceCommit = "1149126278c1069cf2666ba63bd6444d98d5a488"
+$sourceCommit = "aa34d607415441909099e8a3f5b00da6d363d541"
 $baseUrl = "https://raw.githubusercontent.com/FabioMacedo87/MarketplaceZero-/$sourceCommit"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $stageRoot = Join-Path $env:TEMP "PORTUGAL-LIFE-REALISMO-$stamp"
@@ -67,6 +67,7 @@ New-Item -ItemType Directory -Force -Path $stageRoot, $backupRoot | Out-Null
 $files = @(
     @{ Local="src\App.tsx"; Remote="src/App.tsx"; Min=10000 },
     @{ Local="src\game\scene3d.ts"; Remote="src/game/scene3d.ts"; Min=20000 },
+    @{ Local="src\game\textures.ts"; Remote="src/game/textures.ts"; Min=10000 },
     @{ Local="src\game\models3d.ts"; Remote="src/game/models3d.ts"; Min=20000 },
     @{ Local=".gitignore"; Remote=".gitignore"; Min=20 },
     @{ Local="INSTALAR-MODELOS-REALISTAS.ps1"; Remote="INSTALAR-MODELOS-REALISTAS.ps1"; Min=3000 },
@@ -102,6 +103,7 @@ $hudDeclaration = $app.IndexOf("const [hud, setHud]")
 $hudUsage = $app.IndexOf("activeActivityRef.current = Boolean(hud.activeActivity)")
 
 $scene = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\scene3d.ts"))
+$textures = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\textures.ts"))
 $models = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\models3d.ts"))
 
 if ($hudDeclaration -lt 0 -or $hudUsage -le $hudDeclaration) {
@@ -112,6 +114,9 @@ if (!$scene.Contains("lucia-locomotion.glb") -or !$scene.Contains("AnimationMixe
 }
 if (!$models.Contains("rear-engine-sports-coupe.glb") -or !$models.Contains("loadRealisticVehicleModel")) {
     throw "A versão descarregada não passou a validação dos veículos."
+}
+if (!$textures.Contains("Procedural PBR asphalt") -or !$scene.Contains("Raised junction surfaces and four-sided zebra crossings") -or !$scene.Contains("const sidewalkWidth = 2.35")) {
+    throw "A versão descarregada não passou a validação das ruas e dos mapas realistas."
 }
 
 Write-Host ""
@@ -144,7 +149,13 @@ try {
     & (Join-Path $projectRoot "INSTALAR-MODELOS-REALISTAS.ps1")
 
     Write-Host ""
-    Write-Host "[5/6] A compilar PORTUGAL LIFE..." -ForegroundColor Cyan
+    Write-Host "[5/6] A validar TypeScript e compilar PORTUGAL LIFE..." -ForegroundColor Cyan
+
+    & bun run lint
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "A validação TypeScript falhou."
+    }
 
     & bun run build
 
