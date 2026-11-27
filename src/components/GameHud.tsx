@@ -16,7 +16,7 @@ import {
   VolumeX,
   Wrench,
 } from 'lucide-react';
-import type { ChatMessage, HudSnapshot, WeaponId } from '../game/types.ts';
+import type { ChatMessage, HudSnapshot, LifeLocation, WeaponId } from '../game/types.ts';
 import { WEAPONS, WEAPON_ORDER } from '../game/weapons.ts';
 
 interface GameHudProps {
@@ -31,7 +31,7 @@ interface GameHudProps {
   onToggleMute: () => void;
   onCycleCamera: () => void;
   onOpenCareer: () => void;
-  onOpenLife: () => void;
+  onOpenLife: (location: LifeLocation | null) => void;
   onOpenGarage: () => void;
   onOpenStory: () => void;
   onOpenRealExplorer: (buildingId?: string | null) => void;
@@ -158,7 +158,7 @@ export const GameHud: React.FC<GameHudProps> = ({
 
             <button
               type="button"
-              onClick={onOpenLife}
+              onClick={() => onOpenLife(hud.nearLifeLocation)}
               aria-label="Abrir a simulação de vida quotidiana"
               className="min-h-[40px] px-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 text-emerald-100 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
@@ -276,6 +276,21 @@ export const GameHud: React.FC<GameHudProps> = ({
           <div className="px-4 py-1.5 rounded-lg bg-[#090D16]/92 border border-white/15 text-xs sm:text-sm font-semibold text-white shadow-lg text-center">
             {hud.toastText}
           </div>
+        )}
+
+        {hud.canInteractLifeLocation && hud.nearLifeLocation && (
+          <button
+            type="button"
+            onClick={() => onOpenLife(hud.nearLifeLocation)}
+            className="pointer-events-auto px-4 py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-bold shadow-lg flex items-center gap-1.5 cursor-pointer"
+          >
+            <Home className="w-4 h-4" aria-hidden="true" />
+            <span>
+              {isMobile
+                ? `Interagir em ${hud.nearLifeLocation.label}`
+                : `[G] Interagir em ${hud.nearLifeLocation.label}`}
+            </span>
+          </button>
         )}
 
         {hud.canInteractMission && (
