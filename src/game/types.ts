@@ -414,6 +414,12 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+export interface AmbientNpcDialogue {
+  speaker: string;
+  text: string;
+  color: string;
+}
+
 export interface HudSnapshot {
   cash: number;
   life: LifeSimulationSnapshot;
@@ -462,6 +468,7 @@ export interface HudSnapshot {
   currentWeapon: WeaponId;
   unlockedWeapons: WeaponId[];
   toastText: string | null;
+  ambientNpcDialogue?: AmbientNpcDialogue | null;
 }
 
 export interface InputState {
