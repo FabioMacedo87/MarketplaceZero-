@@ -12,6 +12,37 @@ export type WeaponId = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'rpg';
 
 export type ProfessionId = 'psp' | 'taxi' | 'courier' | 'merchant' | 'paramedic';
 
+export type LifeJobId = 'barista' | 'retail' | 'courier' | 'gardener' | 'construction';
+
+export type LifeAction =
+  | 'sleep'
+  | 'shower'
+  | 'cook'
+  | 'drink'
+  | 'buy_supplies'
+  | 'eat_out'
+  | 'work_shift'
+  | 'socialise'
+  | 'study'
+  | 'withdraw_50';
+
+export interface LifeSimulationSnapshot {
+  day: number;
+  minuteOfDay: number;
+  energy: number;
+  hunger: number;
+  thirst: number;
+  hygiene: number;
+  mood: number;
+  bankBalance: number;
+  groceries: number;
+  waterBottles: number;
+  job: LifeJobId;
+  jobExperience: number;
+  socialProgress: number;
+  studyProgress: number;
+}
+
 export type MiniGameKind = 'cargo_seal' | 'ledger_trade' | 'medical_triage' | 'psp_inspection';
 
 export interface NpcOption {
@@ -342,6 +373,7 @@ export interface ChatMessage {
 
 export interface HudSnapshot {
   cash: number;
+  life: LifeSimulationSnapshot;
   hp: number;
   maxHp: number;
   armor: number;
