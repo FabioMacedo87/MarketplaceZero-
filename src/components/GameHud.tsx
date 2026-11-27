@@ -168,7 +168,7 @@ export const GameHud: React.FC<GameHudProps> = ({
 
             <button
               type="button"
-              onClick={onCall112
+              onClick={onCall112}
               aria-label="Ligar 112 para PSP e INEM"
               className="min-h-[40px] min-w-[40px] px-2 rounded-lg bg-rose-500/20 border border-rose-400/50 hover:bg-rose-500/30 text-rose-200 text-xs font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer"
             >
