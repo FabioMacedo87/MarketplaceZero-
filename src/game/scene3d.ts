@@ -1548,13 +1548,18 @@ export class LeonidaScene3D {
         playerDrivenVeh = v;
       }
 
-      rig.paintMat.color.set(v.color);
+      if (rig.paintMaterials?.length) {
+        for (const material of rig.paintMaterials) material.color.set(v.color);
+      } else {
+        rig.paintMat.color.set(v.color);
+      }
       rig.group.position.set(v.x * WORLD_SCALE, 0, v.y * WORLD_SCALE);
       rig.group.rotation.y = -v.angle;
 
       const spinDelta = -(v.speed * WORLD_SCALE * dt) / 0.38;
       for (const w of rig.wheelRollers) {
-        w.rotation.z += spinDelta;
+        if (rig.wheelAxis === 'x') w.rotation.x += spinDelta;
+        else w.rotation.z += spinDelta;
       }
 
       const targetSteer = v.id === engine.player.vehicleId ? clampSteerVisual(v) : 0;
