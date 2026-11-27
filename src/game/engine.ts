@@ -717,6 +717,20 @@ export class LeonidaEngine {
 
     const perf = clamp(performanceMul, 0.5, 1.5);
 
+    if (act.id.startsWith('life-location-')) {
+      const socialGain = Math.max(2, Math.round(act.bonusRep * perf));
+      this.life = advanceLifeSimulation(this.life, 10);
+      this.life.socialProgress = clamp(this.life.socialProgress + socialGain);
+      this.life.mood = clamp(this.life.mood + 5 + act.bonusRep);
+      const cashBonus = Math.round(act.bonusCash * perf);
+      this.player.cash += cashBonus;
+      this.player.reputation += socialGain;
+      saveLifeSave(this.life, this.player.cash);
+      soundEngine.playPickup();
+      this.showToast(`Conversaste com ${act.npcName}. Rede social +${socialGain}.`, 3);
+      return;
+    }
+
     // Standalone PSP stop OR PSP mission activity
     if (act.miniGameKind === 'psp_inspection' && act.pspTarget) {
       const target = act.pspTarget;
@@ -1196,6 +1210,51 @@ export class LeonidaEngine {
       }
     }
     return nearest;
+  }
+
+  public openLifeLocationConversation(locationId: string) {
+    if (this.activeActivity) return;
+    const location = LIFE_LOCATIONS.find((item) => item.id === locationId);
+    if (!location || dist(this.player.x, this.player.y, location.x, location.y) > location.radius) {
+      this.showToast('Aproxima-te ao local antes de conversar.', 2.4);
+      return;
+    }
+
+    this.activeActivity = {
+      id: `life-location-${location.id}-${Date.now()}`,
+      buildingName: location.label,
+      npcName: location.npcName,
+      npcRole: location.npcRole,
+      npcColor: location.npcColor,
+      greeting: location.description + '. Como posso ajudar?',
+      options: [
+        {
+          label: 'Cumprimentar e conversar',
+          reply: 'É sempre bom conhecer melhor quem vive e trabalha nesta zona do Porto.',
+          cashBonus: 0,
+          repBonus: 3,
+        },
+        {
+          label: 'Perguntar por oportunidades e atividades',
+          reply: 'Posso indicar-te o que se passa por aqui. Vai conhecendo as pessoas e participa na comunidade.',
+          cashBonus: 2,
+          repBonus: 4,
+        },
+        {
+          label: 'Pedir uma recomendação local',
+          reply: 'Fica a conhecer os pequenos negócios e os serviços da zona. A cidade tem muito para descobrir.',
+          cashBonus: 0,
+          repBonus: 5,
+        },
+      ],
+      miniGameKind: 'conversation',
+      miniGameTitle: 'Conversa com ' + location.npcName,
+      miniGameSubtitle: 'Escolhe a tua abordagem e termina a conversa para registar a interação.',
+      phase: 'dialogue',
+      selectedOptionReply: null,
+      bonusCash: 0,
+      bonusRep: 0,
+    };
   }
 
   public focusBuildingWaypoint(buildingId: string) {
