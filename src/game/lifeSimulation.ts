@@ -114,7 +114,6 @@ export function performLifeAction(
       let sleepMinutes: number;
       if (life.minuteOfDay >= 21 * 60 || life.minuteOfDay < wakeTime) {
         sleepMinutes = (wakeTime - life.minuteOfDay + 1440) % 1440;
-        if (sleepMinutes < 240) sleepMinutes += 1440;
       } else {
         sleepMinutes = 8 * 60;
       }
