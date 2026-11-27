@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { FXAAPass } from 'three/addons/postprocessing/FXAAPass.js';
@@ -90,6 +91,13 @@ function detectSoftwareWebGL(): boolean {
   }
 }
 
+interface RealisticPlayerAsset {
+  group: THREE.Group;
+  mixer: THREE.AnimationMixer;
+  actions: Map<'idle' | 'walk' | 'jog' | 'run', THREE.AnimationAction>;
+  activeAction: THREE.AnimationAction | null;
+}
+
 export class LeonidaScene3D {
   public readonly isSoftwareGl: boolean;
   public readonly renderer: THREE.WebGLRenderer;
@@ -141,6 +149,9 @@ export class LeonidaScene3D {
   private remoteRigs = new Map<string, RemoteRenderEntry>();
   private playerRig: CharacterRig;
   private playerCharacter: CharacterId;
+  private readonly assetLoader = new GLTFLoader();
+  private realisticPlayer: RealisticPlayerAsset | null = null;
+  private realisticPlayerLoadToken = 0;
 
   private bulletMesh: THREE.InstancedMesh;
   private particleMesh: THREE.InstancedMesh;
@@ -265,6 +276,7 @@ export class LeonidaScene3D {
       'pistol',
     );
     this.scene.add(this.playerRig.group);
+    void this.loadRealisticPlayerModel(initialCharacter);
 
     const bulletGeo = new THREE.SphereGeometry(0.18, 6, 6);
     const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -1225,6 +1237,116 @@ export class LeonidaScene3D {
     });
   }
 
+  private async loadRealisticPlayerModel(character: CharacterId) {
+    const loadToken = ++this.realisticPlayerLoadToken;
+    const previous = this.realisticPlayer;
+    if (previous) {
+      previous.mixer.stopAllAction();
+      this.scene.remove(previous.group);
+      this.realisticPlayer = null;
+    }
+    this.playerRig.group.visible = true;
+
+    const modelPath =
+      character === 'lucia'
+        ? '/models/characters/lucia-locomotion.glb'
+        : '/models/characters/jason-locomotion.glb';
+
+    try {
+      const gltf = await this.assetLoader.loadAsync(modelPath);
+      if (loadToken !== this.realisticPlayerLoadToken) return;
+
+      const model = gltf.scene;
+      model.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (mesh.isMesh) {
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.frustumCulled = true;
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const material of materials) {
+            material.side = THREE.FrontSide;
+          }
+        }
+      });
+
+      // The supplied human assets are authored at real-world scale.
+      const bounds = new THREE.Box3().setFromObject(model);
+      const modelHeight = bounds.getSize(new THREE.Vector3()).y;
+      if (modelHeight > 0.01) {
+        const scale = 1.76 / modelHeight;
+        model.scale.setScalar(scale);
+        model.position.y = -bounds.min.y * scale;
+      }
+
+      // The game world uses +X as the character's forward direction.
+      model.rotation.y = Math.PI / 2;
+
+      const group = new THREE.Group();
+      group.add(model);
+      this.scene.add(group);
+
+      const mixer = new THREE.AnimationMixer(model);
+      const actions = new Map<'idle' | 'walk' | 'jog' | 'run', THREE.AnimationAction>();
+      for (const clip of gltf.animations) {
+        const name = clip.name.toLowerCase().replace(/[_-]+/g, ' ');
+        let key: 'idle' | 'walk' | 'jog' | 'run' | null = null;
+        if (name.includes('idle')) key = 'idle';
+        else if (name.includes('run') || name.includes('sprint')) key = 'run';
+        else if (name.includes('jog')) key = 'jog';
+        else if (name.includes('walk') || name.includes('locomotion')) key = 'walk';
+
+        if (key && !actions.has(key)) {
+          const action = mixer.clipAction(clip);
+          action.enabled = true;
+          action.setEffectiveTimeScale(1);
+          actions.set(key, action);
+        }
+      }
+
+      // Always provide an idle fallback, then a walk fallback if the pack has fewer clips.
+      const firstAction = actions.values().next().value as THREE.AnimationAction | undefined;
+      if (!actions.has('idle') && firstAction) actions.set('idle', firstAction);
+      if (!actions.has('walk') && firstAction) actions.set('walk', firstAction);
+      if (actions.has('idle')) actions.get('idle')?.play();
+
+      this.realisticPlayer = {
+        group,
+        mixer,
+        actions,
+        activeAction: actions.get('idle') ?? firstAction ?? null,
+      };
+      this.playerRig.group.visible = false;
+      console.info('[PORTUGAL LIFE] Modelo humano realista carregado:', modelPath, gltf.animations.map((clip) => clip.name));
+    } catch (error) {
+      if (loadToken === this.realisticPlayerLoadToken) {
+        this.playerRig.group.visible = true;
+        console.warn('[PORTUGAL LIFE] Modelo humano externo indisponível; a usar o modelo de reserva.', error);
+      }
+    }
+  }
+
+  private updateRealisticPlayerAnimation(speed: number, deltaSeconds: number) {
+    const player = this.realisticPlayer;
+    if (!player) return;
+
+    const requested: 'idle' | 'walk' | 'jog' | 'run' =
+      speed < 0.2 ? 'idle' : speed > 7 ? 'run' : speed > 4 ? 'jog' : 'walk';
+    const nextAction =
+      player.actions.get(requested) ??
+      player.actions.get(requested === 'run' || requested === 'jog' ? 'walk' : 'idle') ??
+      player.actions.values().next().value;
+
+    if (nextAction && nextAction !== player.activeAction) {
+      nextAction.reset();
+      nextAction.fadeIn(0.22).play();
+      player.activeAction?.fadeOut(0.22);
+      player.activeAction = nextAction;
+    }
+
+    player.mixer.update(deltaSeconds);
+  }
+
   public syncCharacterModel(character: CharacterId, profession: ProfessionId = 'taxi') {
     if (this.playerCharacter !== character) {
       this.playerCharacter = character;
@@ -1238,6 +1360,7 @@ export class LeonidaScene3D {
         prevWeapon,
       );
       this.scene.add(this.playerRig.group);
+      void this.loadRealisticPlayerModel(character);
     }
     this.playerRig.jacketMat.color.set(PROFESSIONS[profession].uniformHex);
   }
@@ -1315,7 +1438,7 @@ export class LeonidaScene3D {
 
     this.updateAtmosphere(engine.dayTime);
     this.syncVehicles(engine, dt);
-    this.syncPlayer(engine, nowSec);
+    this.syncPlayer(engine, nowSec, dt);
     this.syncPedestrians(engine, nowSec);
     this.syncLifeLocationMarkers(engine, nowSec);
     this.syncLifeLocationNpcs(engine, nowSec, dt);
@@ -1488,11 +1611,27 @@ export class LeonidaScene3D {
     }
   }
 
-  private syncPlayer(engine: LeonidaEngine, nowSec: number) {
+  private syncPlayer(engine: LeonidaEngine, nowSec: number, deltaSeconds: number) {
     if (engine.player.vehicleId) {
       this.playerRig.group.visible = false;
+      if (this.realisticPlayer) this.realisticPlayer.group.visible = false;
       return;
     }
+
+    const speed = Math.hypot(engine.player.vx, engine.player.vy);
+    if (this.realisticPlayer) {
+      this.playerRig.group.visible = false;
+      this.realisticPlayer.group.visible = true;
+      this.realisticPlayer.group.position.set(
+        engine.player.x * WORLD_SCALE,
+        0,
+        engine.player.y * WORLD_SCALE,
+      );
+      this.realisticPlayer.group.rotation.y = -engine.player.angle;
+      this.updateRealisticPlayerAnimation(speed, deltaSeconds);
+      return;
+    }
+
     this.playerRig.group.visible = true;
     this.playerRig.jacketMat.color.set(PROFESSIONS[engine.player.profession].uniformHex);
     setCharacterRigWeapon(this.playerRig, engine.player.currentWeapon);
@@ -1502,9 +1641,7 @@ export class LeonidaScene3D {
       engine.player.y * WORLD_SCALE,
     );
     this.playerRig.group.rotation.y = -engine.player.angle;
-
-    const spd = Math.hypot(engine.player.vx, engine.player.vy);
-    animateCharacterRig(this.playerRig, spd, true, false, nowSec, 0);
+    animateCharacterRig(this.playerRig, speed, true, false, nowSec, 0);
   }
 
   private syncPedestrians(engine: LeonidaEngine, nowSec: number) {
@@ -1911,6 +2048,12 @@ export class LeonidaScene3D {
 
   public dispose() {
     this.stopLoop();
+    this.realisticPlayerLoadToken += 1;
+    if (this.realisticPlayer) {
+      this.realisticPlayer.mixer.stopAllAction();
+      this.scene.remove(this.realisticPlayer.group);
+      this.realisticPlayer = null;
+    }
     this.renderer.domElement.removeEventListener('webglcontextlost', this.handleContextLost);
     this.renderer.domElement.removeEventListener('webglcontextrestored', this.handleContextRestored);
 
