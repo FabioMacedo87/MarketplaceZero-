@@ -61,7 +61,7 @@ export interface LifeSimulationSnapshot {
   studyProgress: number;
 }
 
-export type MiniGameKind = 'cargo_seal' | 'ledger_trade' | 'medical_triage' | 'psp_inspection';
+export type MiniGameKind = 'cargo_seal' | 'ledger_trade' | 'medical_triage' | 'psp_inspection' | 'conversation';
 
 export interface NpcOption {
   label: string;
