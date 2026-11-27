@@ -1414,7 +1414,10 @@ export function createBuildingRig(
   addInstancedDetails(balconyPostGeometry, balconyMetalMat, balconyPostInstances);
 
   // Continuous stone cornice breaks up the single-box silhouette and casts a fine shadow.
-  const corniceY = Math.min(19.2, b.floors * 2.8) + 0.28;
+  const corniceY =
+    kind === 'clerigos' ? 13.9 :
+    kind === 'serra_pilar' ? 10.1 :
+    Math.min(19.2, b.floors * 2.8) + 0.28;
   const corniceMaterial = SHARED_WHITE_STONE_MAT;
   const corniceFront = new THREE.Mesh(new THREE.BoxGeometry(w + 0.9, 0.28, 0.32), corniceMaterial);
   corniceFront.position.set(0, corniceY, d * 0.5 + 0.02);
@@ -1427,8 +1430,16 @@ export function createBuildingRig(
   group.add(corniceFront, corniceBack, corniceSide, corniceOtherSide);
   corniceFront.castShadow = corniceBack.castShadow = corniceSide.castShadow = corniceOtherSide.castShadow = enableShadows;
 
-  // Terracotta chimney stacks and small roof service housings add believable roof silhouettes.
-  if (b.facadeStyle !== 'white_concrete' && kind !== 'clerigos' && kind !== 'serra_pilar') {
+  // Terracotta chimney stacks and rooftop service details follow each landmark's roof height.
+  const roofLevels: Partial<Record<typeof kind, number>> = {
+    camara: 18.2,
+    saobento: 19.4,
+    lello: 18.7,
+    bolhao: 10.8,
+    ribeira: 19.2,
+    caves_gaia: 13.2,
+  };
+  if (roofLevels[kind] !== undefined) {
     const chimneyGeometry = new THREE.BoxGeometry(0.72, 1.5, 0.72);
     const chimneyCapGeometry = new THREE.BoxGeometry(0.92, 0.16, 0.92);
     const chimneyMat = new THREE.MeshStandardMaterial({
@@ -1436,9 +1447,10 @@ export function createBuildingRig(
       roughness: 0.88,
       metalness: 0.02,
     });
+    const roofLevel = roofLevels[kind] ?? corniceY;
     for (let chimney = 0; chimney < 2; chimney += 1) {
       const x = chimney === 0 ? -w * 0.28 : w * 0.3;
-      const base = corniceY + 0.25;
+      const base = roofLevel + 0.18;
       const stack = new THREE.Mesh(chimneyGeometry, chimneyMat);
       stack.position.set(x, base + 0.75, -d * 0.16);
       const cap = new THREE.Mesh(chimneyCapGeometry, chimneyMat);
@@ -1450,7 +1462,7 @@ export function createBuildingRig(
       new THREE.BoxGeometry(Math.max(1.2, w * 0.16), 0.82, Math.max(1.0, d * 0.14)),
       SHARED_SLATE_MAT,
     );
-    roofHatch.position.set(w * 0.12, corniceY + 0.42, d * 0.18);
+    roofHatch.position.set(w * 0.12, roofLevel + 0.42, d * 0.18);
     roofHatch.castShadow = enableShadows;
     group.add(roofHatch);
   }
