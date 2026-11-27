@@ -384,7 +384,7 @@ export function createVehicleRig(
   const headlightMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     emissive: 0xfef3c7,
-    emissiveIntensity: 1.5,
+    emissiveIntensity: 0.85,
     roughness: 0.15,
   });
   const hlGeo = new THREE.BoxGeometry(0.1, 0.15, 0.36);
@@ -410,7 +410,7 @@ export function createVehicleRig(
   const taillightMat = new THREE.MeshStandardMaterial({
     color: 0xef4444,
     emissive: 0xef4444,
-    emissiveIntensity: 1.2,
+    emissiveIntensity: 0.78,
     roughness: 0.2,
   });
   const tlGeo = new THREE.BoxGeometry(0.09, 0.14, 0.4);
@@ -422,11 +422,12 @@ export function createVehicleRig(
 
   const wheelRollers: THREE.Object3D[] = [];
   const frontSteerPivots: THREE.Object3D[] = [];
-  const tireGeo = new THREE.CylinderGeometry(wheelR, wheelR, wheelW, 18);
+  const tireGeo = new THREE.CylinderGeometry(wheelR, wheelR, wheelW, 32);
   tireGeo.rotateX(Math.PI / 2);
-  const rotorGeo = new THREE.CylinderGeometry(wheelR * 0.64, wheelR * 0.64, wheelW * 0.5, 12);
+  const rotorGeo = new THREE.CylinderGeometry(wheelR * 0.64, wheelR * 0.64, wheelW * 0.5, 24);
   rotorGeo.rotateX(Math.PI / 2);
-  const spokeGeo = new THREE.BoxGeometry(wheelR * 1.12, 0.07, wheelW + 0.03);
+  const spokeGeo = new THREE.BoxGeometry(wheelR * 1.12, 0.055, wheelW + 0.03);
+  const rimRingGeo = new THREE.TorusGeometry(wheelR * 0.68, 0.045, 8, 28);
 
   const wheelPositions: [number, number, boolean][] = [
     [len * 0.31, -wid * 0.5 + wheelW * 0.15, true],
@@ -448,7 +449,12 @@ export function createVehicleRig(
     spokeB.rotation.z = Math.PI * 0.4;
     const spokeC = new THREE.Mesh(spokeGeo, SHARED_RIM_MAT);
     spokeC.rotation.z = -Math.PI * 0.4;
-    wheelGroup.add(tire, rotor, spokeA, spokeB, spokeC);
+    const spokeD = new THREE.Mesh(spokeGeo, SHARED_RIM_MAT);
+    spokeD.rotation.z = Math.PI * 0.8;
+    const spokeE = new THREE.Mesh(spokeGeo, SHARED_RIM_MAT);
+    spokeE.rotation.z = -Math.PI * 0.8;
+    const rimRing = new THREE.Mesh(rimRingGeo, SHARED_RIM_MAT);
+    wheelGroup.add(tire, rotor, rimRing, spokeA, spokeB, spokeC, spokeD, spokeE);
 
     steerPivot.add(wheelGroup);
     group.add(steerPivot);
@@ -470,7 +476,7 @@ export function createVehicleRig(
     sirenRed = new THREE.MeshStandardMaterial({
       color: 0xef4444,
       emissive: 0xef4444,
-      emissiveIntensity: 2.0,
+      emissiveIntensity: 1.15,
     });
     sirenBlue = new THREE.MeshStandardMaterial({
       color: 0x3b82f6,
@@ -491,7 +497,7 @@ export function createVehicleRig(
     const signMat = new THREE.MeshStandardMaterial({
       color: 0x6ee7b7,
       emissive: 0x10b981,
-      emissiveIntensity: 1.4,
+      emissiveIntensity: 0.8,
     });
     const sign = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.22, 0.74), signMat);
     sign.position.set(-0.2, bodyBaseY + 1.24, 0);
@@ -583,7 +589,7 @@ export function createCharacterRig(
   shadow.position.y = 0.03;
   group.add(shadow);
 
-  const pelvis = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.14, 6, 10), pantsMat);
+  const pelvis = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.14, 10, 16), pantsMat);
   pelvis.rotation.x = Math.PI / 2;
   pelvis.position.set(0, 0.9, 0);
   bodyRoot.add(pelvis);
@@ -594,7 +600,7 @@ export function createCharacterRig(
   bodyRoot.add(belt);
 
   const chest = new THREE.Mesh(
-    new THREE.CapsuleGeometry(isLucia ? 0.175 : 0.2, 0.34, 8, 12),
+    new THREE.CapsuleGeometry(isLucia ? 0.175 : 0.2, 0.34, 12, 18),
     jacketMat,
   );
   chest.scale.set(0.72, 1, isLucia ? 1.04 : 1.16);
@@ -610,12 +616,12 @@ export function createCharacterRig(
   headGroup.position.set(0, 1.68, 0);
   bodyRoot.add(headGroup);
 
-  const cranium = new THREE.Mesh(new THREE.SphereGeometry(0.145, 16, 14), skinMat);
+  const cranium = new THREE.Mesh(new THREE.SphereGeometry(0.145, 24, 18), skinMat);
   cranium.scale.set(0.95, 1.12, 0.88);
   cranium.castShadow = enableShadows;
   headGroup.add(cranium);
 
-  const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), skinMat);
+  const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.1, 18, 14), skinMat);
   jaw.scale.set(0.92, 0.85, 0.78);
   jaw.position.set(0.03, -0.065, 0);
   headGroup.add(jaw);
@@ -625,7 +631,7 @@ export function createCharacterRig(
   nose.position.set(0.145, -0.01, 0);
   headGroup.add(nose);
 
-  const hairCrown = new THREE.Mesh(new THREE.SphereGeometry(0.152, 14, 12), hairMat);
+  const hairCrown = new THREE.Mesh(new THREE.SphereGeometry(0.152, 22, 16), hairMat);
   hairCrown.scale.set(0.98, 0.95, 0.92);
   hairCrown.position.set(-0.02, 0.045, 0);
   headGroup.add(hairCrown);
@@ -641,9 +647,9 @@ export function createCharacterRig(
   shades.position.set(0.125, 0.025, 0);
   headGroup.add(shades);
 
-  const thighGeo = new THREE.CapsuleGeometry(0.078, 0.28, 6, 10);
+  const thighGeo = new THREE.CapsuleGeometry(0.078, 0.28, 10, 14);
   thighGeo.translate(0, -0.2, 0);
-  const calfGeo = new THREE.CapsuleGeometry(0.064, 0.28, 6, 10);
+  const calfGeo = new THREE.CapsuleGeometry(0.064, 0.28, 10, 14);
   calfGeo.translate(0, -0.2, 0);
   const shoeGeo = new THREE.BoxGeometry(0.22, 0.09, 0.12);
   shoeGeo.translate(0.04, -0.42, 0);
@@ -669,9 +675,9 @@ export function createCharacterRig(
   const leftLeg = makeLeg(-0.12);
   const rightLeg = makeLeg(0.12);
 
-  const upperArmGeo = new THREE.CapsuleGeometry(0.056, 0.2, 6, 8);
+  const upperArmGeo = new THREE.CapsuleGeometry(0.056, 0.2, 10, 12);
   upperArmGeo.translate(0, -0.14, 0);
-  const foreArmGeo = new THREE.CapsuleGeometry(0.046, 0.19, 6, 8);
+  const foreArmGeo = new THREE.CapsuleGeometry(0.046, 0.19, 10, 12);
   foreArmGeo.translate(0, -0.13, 0);
   const handGeo = new THREE.SphereGeometry(0.05, 8, 8);
 
@@ -845,7 +851,7 @@ export function createBuildingRig(
     map,
     emissiveMap,
     emissive: new THREE.Color('#ffffff'),
-    emissiveIntensity: 0.55,
+    emissiveIntensity: 0.16,
     roughnessMap,
     roughness: 0.72,
     metalness: 0.12,
@@ -861,7 +867,7 @@ export function createBuildingRig(
   const warmLobbyMat = new THREE.MeshStandardMaterial({
     color: 0xfef3c7,
     emissive: 0xfbbf24,
-    emissiveIntensity: 1.35,
+    emissiveIntensity: 0.55,
     roughness: 0.25,
   });
   const windowGlowMats: THREE.MeshStandardMaterial[] = [warmLobbyMat];
