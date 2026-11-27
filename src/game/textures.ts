@@ -44,119 +44,102 @@ function loadCachedImage(url: string): Promise<HTMLImageElement> {
   return promise;
 }
 
-function drawRoadMarkingsAndPuddles(
-  ctx: CanvasRenderingContext2D,
-  rCtx: CanvasRenderingContext2D,
-  size: number,
-) {
-  // Wet Atlantic rain puddles across the granite paving
-  for (let i = 0; i < 6; i++) {
-    const px = ((85 + i * 89) % 340) * (size / 512);
-    const py = ((55 + i * 131) % 400) * (size / 512);
-    const rx = (44 + (i % 3) * 24) * (size / 512);
-    const ry = (68 + (i % 2) * 32) * (size / 512);
-    const rGrad = rCtx.createRadialGradient(px, py, 6, px, py, Math.max(rx, ry));
-    rGrad.addColorStop(0, '#141414');
-    rGrad.addColorStop(0.55, '#4A4A4A');
-    rGrad.addColorStop(1, 'rgba(184,184,184,0)');
-    rCtx.fillStyle = rGrad;
-    rCtx.beginPath();
-    rCtx.ellipse(px, py, rx, ry, 0.2, 0, Math.PI * 2);
-    rCtx.fill();
-
-    const cGrad = ctx.createRadialGradient(px, py, 6, px, py, Math.max(rx, ry));
-    cGrad.addColorStop(0, 'rgba(8, 13, 22, 0.34)');
-    cGrad.addColorStop(1, 'rgba(8, 13, 22, 0)');
-    ctx.fillStyle = cGrad;
-    ctx.beginPath();
-    cGrad && ctx.ellipse(px, py, rx, ry, 0.2, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Crisp European white edge lines & center dashed road divider + tram rail hint
-  const s = size / 512;
-  ctx.fillStyle = 'rgba(241, 245, 249, 0.86)';
-  ctx.fillRect(14 * s, 0, 7 * s, size);
-  ctx.fillRect(size - 21 * s, 0, 7 * s, size);
-
-  ctx.fillStyle = 'rgba(248, 250, 252, 0.88)';
-  for (let y = 18 * s; y < size; y += 96 * s) {
-    ctx.fillRect(size / 2 - 4 * s, y, 8 * s, 48 * s);
-  }
-}
-
-// Photorealistic Porto Granite Cobblestones (Paralelo do Porto) + Wet Specular Puddles
+// Procedural PBR asphalt for Porto and Gaia road surfaces.
+// Lane paint is added as geometry in scene3d.ts, never baked into the texture.
 export function createAsphaltTextures(anisotropy: number): {
   map: THREE.CanvasTexture;
   roughnessMap: THREE.CanvasTexture;
   normalMap: THREE.CanvasTexture;
 } {
   const size = 1024;
-  const [cColor, ctx] = createCanvas(size, size);
-  const [cRough, rCtx] = createCanvas(size, size);
-  const [cNorm, nCtx] = createCanvas(size, size);
+  const [colorCanvas, colorCtx] = createCanvas(size, size);
+  const [roughCanvas, roughCtx] = createCanvas(size, size);
+  const [normalCanvas, normalCtx] = createCanvas(size, size);
 
-  ctx.fillStyle = '#2A303B';
-  ctx.fillRect(0, 0, size, size);
+  const colorPixels = colorCtx.createImageData(size, size);
+  const roughPixels = roughCtx.createImageData(size, size);
+  const normalPixels = normalCtx.createImageData(size, size);
 
-  rCtx.fillStyle = '#B8B8B8';
-  rCtx.fillRect(0, 0, size, size);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const index = (y * size + x) * 4;
+      const broad =
+        Math.sin((x / size) * Math.PI * 8 + Math.sin((y / size) * Math.PI * 4)) * 0.5 +
+        Math.cos((y / size) * Math.PI * 10 - (x / size) * Math.PI * 3) * 0.35;
+      const grain = Math.abs(Math.sin((x * 127.1 + y * 311.7) * 0.017) * 43758.5453) % 1;
+      const fine = Math.abs(Math.sin((x * 269.5 + y * 183.3) * 0.071) * 24634.6345) % 1;
+      const tone = 43 + broad * 4.5 + (grain - 0.5) * 12 + (fine - 0.5) * 8;
+      const value = Math.max(27, Math.min(68, Math.round(tone)));
 
-  nCtx.fillStyle = 'rgb(128,128,255)';
-  nCtx.fillRect(0, 0, size, size);
+      colorPixels.data[index] = value;
+      colorPixels.data[index + 1] = value + 1;
+      colorPixels.data[index + 2] = value + 4;
+      colorPixels.data[index + 3] = 255;
 
-  // Instant procedural granite under-layer while real photo decodes
-  const rowH = 32;
-  const stoneW = 56;
-  for (let row = 0; row < size / rowH; row++) {
-    const y = row * rowH;
-    const offset = (row % 2) * (stoneW * 0.5);
-    for (let col = -1; col < size / stoneW + 1; col++) {
-      const x = col * stoneW + offset;
-      const hash = Math.abs(Math.sin((row * 29 + col * 17) * 12.9898) * 43758.5453) % 1;
-      const shade = Math.round(48 + hash * 24);
-      ctx.fillStyle = `rgb(${shade}, ${shade + 3}, ${shade + 9})`;
-      ctx.fillRect(x + 2, y + 2, stoneW - 4, rowH - 4);
+      const rough = Math.max(150, Math.min(245, Math.round(212 + broad * 10 + (grain - 0.5) * 28)));
+      roughPixels.data[index] = rough;
+      roughPixels.data[index + 1] = rough;
+      roughPixels.data[index + 2] = rough;
+      roughPixels.data[index + 3] = 255;
 
-      const nx = Math.round(120 + hash * 16);
-      const ny = Math.round(120 + (row % 3) * 5);
-      nCtx.fillStyle = `rgb(${nx},${ny},248)`;
-      nCtx.fillRect(x + 3, y + 3, stoneW - 6, rowH - 6);
-      nCtx.fillStyle = 'rgb(96,96,216)';
-      nCtx.fillRect(x, y, stoneW, 3);
+      const nx = Math.max(0, Math.min(255, Math.round(128 + (grain - 0.5) * 14 + broad * 4)));
+      const ny = Math.max(0, Math.min(255, Math.round(128 + (fine - 0.5) * 14 - broad * 3)));
+      normalPixels.data[index] = nx;
+      normalPixels.data[index + 1] = ny;
+      normalPixels.data[index + 2] = 250;
+      normalPixels.data[index + 3] = 255;
     }
   }
-  drawRoadMarkingsAndPuddles(ctx, rCtx, size);
 
-  const mapTex = configureTexture(cColor, true, anisotropy);
-  const roughTex = configureTexture(cRough, false, anisotropy);
-  const normTex = configureTexture(cNorm, false, anisotropy);
+  colorCtx.putImageData(colorPixels, 0, 0);
+  roughCtx.putImageData(roughPixels, 0, 0);
+  normalCtx.putImageData(normalPixels, 0, 0);
 
-  // Upgrade street texture seamlessly to real photographic Porto cobblestone
-  loadCachedImage(portoCobblePhotoUrl)
-    .then((img) => {
-      // Tile 2x2 so cobblestone scale stays natural and crisp
-      const half = size / 2;
-      ctx.drawImage(img, 0, 0, half, half);
-      ctx.drawImage(img, half, 0, half, half);
-      ctx.drawImage(img, 0, half, half, half);
-      ctx.drawImage(img, half, half, half, half);
+  // Faded wheel paths and small tar repairs add scale without making roads look dirty.
+  colorCtx.save();
+  colorCtx.globalAlpha = 0.12;
+  colorCtx.strokeStyle = '#15181d';
+  colorCtx.lineWidth = 34;
+  colorCtx.beginPath();
+  colorCtx.moveTo(size * 0.31, 0);
+  colorCtx.bezierCurveTo(size * 0.28, size * 0.32, size * 0.34, size * 0.68, size * 0.31, size);
+  colorCtx.moveTo(size * 0.68, 0);
+  colorCtx.bezierCurveTo(size * 0.65, size * 0.3, size * 0.72, size * 0.72, size * 0.69, size);
+  colorCtx.stroke();
 
-      // Subtle atmospheric road darkening for strong contrast with white lane paint
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.22)';
-      ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 13; i += 1) {
+    const x = (i * 173 + 91) % size;
+    const y = (i * 257 + 47) % size;
+    const w = 34 + (i % 4) * 22;
+    const h = 18 + (i % 3) * 13;
+    colorCtx.fillStyle = i % 2 === 0 ? '#24272c' : '#62656a';
+    colorCtx.globalAlpha = 0.13;
+    colorCtx.beginPath();
+    colorCtx.roundRect(x, y, w, h, 5);
+    colorCtx.fill();
+  }
+  colorCtx.restore();
 
-      drawRoadMarkingsAndPuddles(ctx, rCtx, size);
-      mapTex.needsUpdate = true;
-      roughTex.needsUpdate = true;
-    })
-    .catch(() => {});
+  // Subtle wet patches catch highlights without making every road glossy.
+  roughCtx.save();
+  for (let i = 0; i < 7; i += 1) {
+    const x = (i * 149 + 76) % size;
+    const y = (i * 223 + 118) % size;
+    const radius = 28 + (i % 3) * 18;
+    const gradient = roughCtx.createRadialGradient(x, y, 4, x, y, radius);
+    gradient.addColorStop(0, 'rgba(95,95,95,0.46)');
+    gradient.addColorStop(1, 'rgba(205,205,205,0)');
+    roughCtx.fillStyle = gradient;
+    roughCtx.beginPath();
+    roughCtx.ellipse(x, y, radius * 1.4, radius * 0.72, 0.18, 0, Math.PI * 2);
+    roughCtx.fill();
+  }
+  roughCtx.restore();
 
-  return {
-    map: mapTex,
-    roughnessMap: roughTex,
-    normalMap: normTex,
-  };
+  const map = configureTexture(colorCanvas, true, anisotropy);
+  const roughnessMap = configureTexture(roughCanvas, false, anisotropy);
+  const normalMap = configureTexture(normalCanvas, false, anisotropy);
+  return { map, roughnessMap, normalMap };
 }
 
 // Traditional Calçada Portuguesa (Wave mosaic sidewalk pattern)
@@ -175,16 +158,26 @@ export function createSidewalkTexture(anisotropy: number): THREE.CanvasTexture {
       const hash = Math.abs(Math.sin((x * 13 + y * 37) * 12.9898) * 43758.5453) % 1;
       if (band) {
         const g = Math.round(42 + hash * 18);
-        ctx.fillStyle = `rgb(${g},${g + 2},${g + 6})`;
+        ctx.fillStyle = 'rgb(' + g + ',' + (g + 2) + ',' + (g + 6) + ')';
       } else {
         const g = Math.round(184 + hash * 24);
-        ctx.fillStyle = `rgb(${g},${g - 5},${g - 12})`;
+        ctx.fillStyle = 'rgb(' + g + ',' + (g - 5) + ',' + (g - 12) + ')';
       }
       ctx.fillRect(x + 1, y + 1, tile - 2, tile - 2);
     }
   }
 
-  return configureTexture(canvas, true, anisotropy, 22, 18);
+  const texture = configureTexture(canvas, true, anisotropy, 22, 18);
+  loadCachedImage(portoCobblePhotoUrl)
+    .then((img) => {
+      ctx.save();
+      ctx.globalAlpha = 0.2;
+      ctx.drawImage(img, 0, 0, size, size);
+      ctx.restore();
+      texture.needsUpdate = true;
+    })
+    .catch(() => {});
+  return texture;
 }
 
 // Portuguese Terracotta Roof Tiles (Telha Lusa)
