@@ -80,10 +80,18 @@ foreach ($file in $files) {
     $stagedFile = Join-Path $stageRoot $file.Local
     New-Item -ItemType Directory -Force -Path (Split-Path $stagedFile -Parent) | Out-Null
 
-    Invoke-WebRequest -Uri "$baseUrl/$($file.Remote)" -OutFile $stagedFile -UseBasicParsing -TimeoutSec 120
+    $downloadUrl = "$baseUrl/$($file.Remote)?cache=$stamp"
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $stagedFile -UseBasicParsing -TimeoutSec 120
 
     if (!(Test-Path $stagedFile) -or (Get-Item $stagedFile).Length -lt $file.Min) {
         throw "Download incompleto: $($file.Local)"
+    }
+
+    if ($file.Local -eq "INSTALAR-MODELOS-REALISTAS.ps1") {
+        $installerText = [System.IO.File]::ReadAllText($stagedFile)
+        if (!$installerText.Contains("Existing valid files were preserved.") -or $installerText.Contains("Os ficheiros ja existentes")) {
+            throw "O servidor devolveu uma versao antiga do instalador. Nenhum codigo foi aplicado."
+        }
     }
 
     Write-Host "[OK] $($file.Local)"
@@ -122,7 +130,12 @@ foreach ($file in $files) {
     Copy-Item (Join-Path $stageRoot $file.Local) $destination -Force
 }
 
-Write-Host "Código atualizado. Backup: $backupRoot" -ForegroundColor Green
+$installedInstaller = [System.IO.File]::ReadAllText((Join-Path $projectRoot "INSTALAR-MODELOS-REALISTAS.ps1"))
+if (!$installedInstaller.Contains("Existing valid files were preserved.")) {
+    throw "A validacao do instalador local falhou. O ficheiro esperado nao foi aplicado."
+}
+
+Write-Host "Codigo atualizado. Backup: $backupRoot" -ForegroundColor Green
 
 try {
     Write-Host ""
