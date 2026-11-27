@@ -222,14 +222,6 @@ function makeVehicle(
   };
 }
 
-const SCENARIO_ORDER: MissionScenarioId[] = [
-  'saobento_bolsa',
-  'clerigos_musica',
-  'bolhao_gaia',
-  'camara_se',
-  'lello_musica',
-];
-
 export class LeonidaEngine {
   public player: PlayerState;
   public character: CharacterId;
@@ -457,12 +449,10 @@ export class LeonidaEngine {
   private buildProfessionMission(
     profession: ProfessionId,
     index: number,
-    forcedScenario?: MissionScenarioId,
   ): Mission {
     const templates = PROFESSION_MISSIONS[profession];
-    const tpl =
-      (forcedScenario ? templates.find((t) => t.scenarioId === forcedScenario) : null) ??
-      templates[(index - 1) % templates.length];
+    const templateIndex = (Math.max(1, index) - 1) % templates.length;
+    const tpl = templates[templateIndex];
 
     const src = BUILDINGS.find((b) => b.id === tpl.sourceId) ?? BUILDINGS[0];
     const dst = BUILDINGS.find((b) => b.id === tpl.destId) ?? BUILDINGS[1];
@@ -2132,11 +2122,9 @@ export class LeonidaEngine {
 
         const completedCh = getStoryChapterByNumber(this.mission.chapterNumber);
         this.missionCounter += 1;
-        const nextScenario = SCENARIO_ORDER[(this.missionCounter - 1) % SCENARIO_ORDER.length];
         this.mission = this.buildProfessionMission(
           this.player.profession,
           this.missionCounter,
-          nextScenario,
         );
         const nextCh = getStoryChapterByNumber(this.mission.chapterNumber);
         this.dialogueQueue = [...completedCh.outroLines, ...nextCh.introLines];
