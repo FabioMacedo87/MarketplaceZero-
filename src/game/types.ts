@@ -61,6 +61,8 @@ export interface LifeSimulationSnapshot {
   studyProgress: number;
   /** Interior activities already completed on the current in-game day. */
   completedInteriorTasks: string[];
+  npcRelationships: Record<string, number>;
+  npcMemories: Record<string, string[]>;
 }
 
 export type MiniGameKind = 'cargo_seal' | 'ledger_trade' | 'medical_triage' | 'psp_inspection' | 'conversation';
@@ -70,6 +72,7 @@ export interface NpcOption {
   reply: string;
   cashBonus: number;
   repBonus: number;
+  memoryTag?: string;
 }
 
 export interface ActiveLandmarkActivity {
@@ -85,6 +88,7 @@ export interface ActiveLandmarkActivity {
   miniGameSubtitle: string;
   phase: 'dialogue' | 'minigame';
   selectedOptionReply: string | null;
+  selectedOptionMemory?: string;
   bonusCash: number;
   bonusRep: number;
   pspTarget?: PspTargetInfo;

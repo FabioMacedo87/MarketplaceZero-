@@ -26,6 +26,8 @@ export function createInitialLifeSimulation(): LifeSimulationSnapshot {
     socialProgress: 0,
     studyProgress: 0,
     completedInteriorTasks: [],
+    npcRelationships: {},
+    npcMemories: {},
   };
 }
 
@@ -275,6 +277,18 @@ export function loadLifeSave(): { life: LifeSimulationSnapshot; cash: number } |
               .filter((id): id is string => typeof id === 'string' && /^[a-z0-9-]{2,64}$/.test(id))
               .slice(0, 80)
           : [],
+        npcRelationships: parsed.life.npcRelationships && typeof parsed.life.npcRelationships === 'object'
+          ? Object.fromEntries(Object.entries(parsed.life.npcRelationships as Record<string, unknown>)
+              .filter(([id, value]) => /^[a-z0-9-]{2,48}$/.test(id) && typeof value === 'number' && Number.isFinite(value))
+              .map(([id, value]) => [id, Math.max(0, Math.min(100, Number(value)))]))
+          : {},
+        npcMemories: parsed.life.npcMemories && typeof parsed.life.npcMemories === 'object'
+          ? Object.fromEntries(Object.entries(parsed.life.npcMemories as Record<string, unknown>)
+              .filter(([id, value]) => /^[a-z0-9-]{2,48}$/.test(id) && Array.isArray(value))
+              .map(([id, value]) => [id, (value as unknown[])
+                .filter((tag): tag is string => typeof tag === 'string' && /^[a-z0-9-]{2,40}$/.test(tag))
+                .slice(-12)]))
+          : {},
       },
       cash: safeNumber(parsed.cash, 650, 0, 100000000),
     };
@@ -286,7 +300,7 @@ export function loadLifeSave(): { life: LifeSimulationSnapshot; cash: number } |
 export function saveLifeSave(life: LifeSimulationSnapshot, cash: number): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, life, cash }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, life, cash }));
   } catch {
     // Storage can be unavailable in private browsing or when device storage is full.
   }

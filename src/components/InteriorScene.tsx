@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { DoorOpen, CheckCircle2, CircleDot, X } from 'lucide-react';
 import { animateCharacterRig, createCharacterRig } from '../game/models3d.ts';
 import { INTERIOR_TASKS, type InteriorTaskDefinition } from '../game/interiorTasks.ts';
+import { getInteriorNpcSchedule } from '../game/npcSchedules.ts';
 import type { CharacterId, LifeJobId, LifeLocation } from '../game/types.ts';
 
 interface InteriorSceneProps {
@@ -10,6 +11,7 @@ interface InteriorSceneProps {
   character: CharacterId;
   job: LifeJobId;
   isMobile: boolean;
+  minuteOfDay: number;
   completedTaskIds: string[];
   onClose: () => void;
   onCompleteTask: (taskId: string) => { ok: boolean; message: string };
@@ -60,6 +62,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
   character,
   job,
   isMobile,
+  minuteOfDay,
   completedTaskIds,
   onClose,
   onCompleteTask,
@@ -78,6 +81,9 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
   const [localCompleted, setLocalCompleted] = useState<string[]>([]);
   const [sceneReady, setSceneReady] = useState(false);
   const completedRef = useRef<string[]>([]);
+  const minuteOfDayRef = useRef(minuteOfDay);
+  const animateTaskPropRef = useRef<(taskId: string, step: number) => void>(() => {});
+  minuteOfDayRef.current = minuteOfDay;
 
   activeTaskRef.current = activeTask;
   completedRef.current = [...completedTaskIds, ...localCompleted];
@@ -106,6 +112,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
       return;
     }
     setActiveTask({ id: task.id, step: 0 });
+    animateTaskPropRef.current(task.id, 0);
     setNotice(task.steps[0]);
   };
   startTaskRef.current = startTask;
@@ -125,9 +132,11 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
       const next = { ...current, step: current.step + 1 };
       activeTaskRef.current = next;
       setActiveTask(next);
+      animateTaskPropRef.current(task.id, next.step);
       setNotice(task.steps[next.step]);
       return;
     }
+    animateTaskPropRef.current(task.id, task.steps.length);
     const result = onCompleteTask(task.id);
     setNotice(result.message);
     if (result.ok) {
@@ -149,6 +158,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
     const ownedMaterials: THREE.Material[] = [];
     const ownedGeometries: THREE.BufferGeometry[] = [];
     const ownedTextures: THREE.Texture[] = [];
+    const taskProps = new Map<string, THREE.Group>();
     let playerRig: ReturnType<typeof createCharacterRig> | null = null;
     let workerRig: ReturnType<typeof createCharacterRig> | null = null;
 
@@ -364,7 +374,9 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
         location.npcName,
         location.npcColor,
       );
-      workerRig.group.position.set(3.4, 0, -2.2);
+      const routine = getInteriorNpcSchedule(location.kind, minuteOfDayRef.current);
+      workerRig.group.position.set(routine.x, 0, routine.z);
+      workerRig.group.userData.routineLabel = routine.activity;
       workerRig.group.rotation.y = Math.PI * 0.72;
       workerRig.group.scale.setScalar(0.9);
       scene.add(workerRig.group);
@@ -388,7 +400,56 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
         ownedGeometries.push(ringGeometry);
         ownedMaterials.push(ringMaterial);
         addLabel(scene, task.stationLabel, task.x, 2.25, task.z, 'rgba(11,22,35,0.88)');
+        const prop = new THREE.Group();
+        prop.position.set(task.x, 0.15, task.z);
+        prop.userData.taskId = task.id;
+        const material = (color: number) => {
+          const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.62, metalness: 0.08 });
+          ownedMaterials.push(mat);
+          return mat;
+        };
+        const box = (x: number, y: number, z: number, w: number, h: number, d: number, color: number) => {
+          const geometry = new THREE.BoxGeometry(w, h, d);
+          const mesh = new THREE.Mesh(geometry, material(color));
+          mesh.position.set(x, y, z);
+          mesh.castShadow = !isMobile;
+          prop.add(mesh);
+          ownedGeometries.push(geometry);
+        };
+        const cylinder = (x: number, y: number, z: number, radius: number, height: number, color: number) => {
+          const geometry = new THREE.CylinderGeometry(radius * 0.82, radius, height, 12);
+          const mesh = new THREE.Mesh(geometry, material(color));
+          mesh.position.set(x, y, z);
+          mesh.castShadow = !isMobile;
+          prop.add(mesh);
+          ownedGeometries.push(geometry);
+        };
+        if (task.id.includes('espresso') || task.id.includes('coffee') || task.id.includes('drink-water')) {
+          cylinder(0, 0.3, 0, 0.18, 0.48, task.id.includes('water') ? 0x60a5fa : 0xf5f1e8);
+          cylinder(0, 0.55, 0, 0.12, 0.06, 0x8b5e3c);
+        } else if (task.id.includes('water') || task.id.includes('garden')) {
+          cylinder(0, 0.28, 0, 0.34, 0.48, 0x3b82a0);
+          box(0.34, 0.36, 0, 0.46, 0.1, 0.12, 0x64748b);
+          box(-0.28, 0.54, 0, 0.12, 0.36, 0.12, 0x64748b);
+        } else if (task.id.includes('brick') || task.id.includes('wall') || task.id.includes('site')) {
+          box(0, 0.28, 0, 0.88, 0.54, 0.62, 0xb75e3d);
+          box(0.05, 0.59, 0.02, 0.68, 0.08, 0.55, 0xb8a58e);
+        } else {
+          box(0, 0.32, 0, 0.72, 0.62, 0.66, 0xb98755);
+          box(0, 0.65, 0, 0.08, 0.08, 0.7, 0xe5d5bc);
+          box(0, 0.65, 0, 0.74, 0.08, 0.08, 0xe5d5bc);
+        }
+        addLabel(prop, 'TOCA / E', 0, 1.35, 0, 'rgba(12,23,37,0.92)');
+        scene.add(prop);
+        taskProps.set(task.id, prop);
       }
+      animateTaskPropRef.current = (taskId, step) => {
+        const prop = taskProps.get(taskId);
+        if (!prop) return;
+        prop.userData.actionStep = step;
+        prop.userData.actionStarted = performance.now() * 0.001;
+        prop.userData.baseRotation = prop.rotation.y;
+      };
 
       addLabel(scene, 'SAÍDA · PORTO', 0, 2.2, 6.3, 'rgba(19,75,61,0.93)');
     };
@@ -433,6 +494,27 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
         if (nearTaskRef.current === id) return;
         nearTaskRef.current = id;
         setNearTaskId(id);
+      };
+
+      const onPropPointerDown = (event: PointerEvent) => {
+        if (!renderer) return;
+        const rect = renderer.domElement.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return;
+        interactionPointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+        interactionRaycaster.setFromCamera(interactionPointer, camera);
+        const hit = interactionRaycaster.intersectObjects([...taskProps.values()], true)[0];
+        if (!hit) return;
+        let object: THREE.Object3D | null = hit.object;
+        while (object && typeof object.userData.taskId !== 'string') object = object.parent;
+        const taskId = object?.userData.taskId;
+        if (typeof taskId !== 'string') return;
+        if (nearTaskRef.current !== taskId && activeTaskRef.current?.id !== taskId) {
+          setNotice('Aproxima-te da estação antes de interagir com o objeto.');
+          return;
+        }
+        if (activeTaskRef.current && activeTaskRef.current.id !== taskId) return;
+        if (!activeTaskRef.current) startTaskRef.current(taskId);
+        else advanceStepRef.current();
       };
 
       const onResize = () => {
@@ -481,6 +563,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
       const onBlur = () => resetKeys();
       window.addEventListener('keydown', onKeyDown);
       window.addEventListener('keyup', onKeyUp);
+      renderer.domElement.addEventListener('pointerdown', onPropPointerDown);
       window.addEventListener('resize', onResize);
       window.addEventListener('blur', onBlur);
 
@@ -488,6 +571,9 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
       const cameraTarget = new THREE.Vector3();
       const cameraDesired = new THREE.Vector3();
       const movement = new THREE.Vector3();
+      const workerTarget = new THREE.Vector3();
+      const interactionRaycaster = new THREE.Raycaster();
+      const interactionPointer = new THREE.Vector2();
       const frame = () => {
         if (disposed || !renderer || !playerRig) return;
         frameId = window.requestAnimationFrame(frame);
@@ -514,7 +600,35 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
         } else {
           animateCharacterRig(playerRig, 0, false, false, elapsed, 0);
         }
-        if (workerRig) animateCharacterRig(workerRig, 0, false, false, elapsed, 1.5);
+        if (workerRig) {
+          const routine = getInteriorNpcSchedule(location.kind, minuteOfDayRef.current);
+          workerTarget.set(routine.x, 0, routine.z);
+          const dx = workerTarget.x - workerRig.group.position.x;
+          const dz = workerTarget.z - workerRig.group.position.z;
+          const distance = Math.hypot(dx, dz);
+          if (distance > 0.045) {
+            const travel = Math.min(distance, delta * 1.15);
+            workerRig.group.position.x += (dx / distance) * travel;
+            workerRig.group.position.z += (dz / distance) * travel;
+            workerRig.group.rotation.y = Math.atan2(dx, dz);
+            animateCharacterRig(workerRig, 18, false, false, elapsed, 1.5);
+          } else {
+            animateCharacterRig(workerRig, 0, false, false, elapsed, 1.5);
+          }
+        }
+        for (const prop of taskProps.values()) {
+          const started = Number(prop.userData.actionStarted ?? -10);
+          const age = Math.max(0, elapsed - started);
+          if (age < 0.72) {
+            const pulse = Math.sin((age / 0.72) * Math.PI);
+            const step = Number(prop.userData.actionStep ?? 0);
+            prop.position.y = 0.15 + pulse * 0.28;
+            prop.rotation.y = Number(prop.userData.baseRotation ?? 0) + pulse * (step % 2 === 0 ? 0.72 : -0.72);
+          } else {
+            prop.position.y = 0.15;
+            prop.rotation.y = Number(prop.userData.baseRotation ?? 0);
+          }
+        }
 
         cameraDesired.set(position.x + 0.2, 5.8, position.z + 8.8);
         cameraTarget.set(position.x, 1.15, position.z - 0.35);
@@ -559,6 +673,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
         window.cancelAnimationFrame(frameId);
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
+        renderer?.domElement.removeEventListener('pointerdown', onPropPointerDown);
+        animateTaskPropRef.current = () => {};
         window.removeEventListener('resize', onResize);
         window.removeEventListener('blur', onBlur);
         resetKeys();
@@ -654,7 +770,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
         <div className="w-full max-w-sm rounded-2xl border border-white/15 bg-slate-950/85 p-3 shadow-xl backdrop-blur-md">
           {activeTask && activeDefinition ? (
             <>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Tarefa em execução</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Tarefa em execução · toca no objeto ou carrega em E</p>
               <h3 className="mt-1 text-sm font-bold">{activeDefinition.title}</h3>
               <p className="mt-1 text-xs text-slate-300">{activeStepLabel}</p>
               <div className="mt-3 flex gap-1">
@@ -668,7 +784,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
             </>
           ) : nearestDefinition ? (
             <>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">Estação próxima</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">Estação próxima · toca no objeto para começar</p>
               <h3 className="mt-1 text-sm font-bold">{nearestDefinition.title}</h3>
               <p className="mt-1 text-xs text-slate-300">{nearestDefinition.description}</p>
               <button type="button" onClick={() => startTask(nearestDefinition.id)} className="mt-3 min-h-10 w-full rounded-xl bg-amber-300 px-4 text-sm font-bold text-slate-950 hover:bg-amber-200">

@@ -360,6 +360,10 @@ export default function App() {
       const mp = mpRef.current;
       const remotePlayers = mp ? mp.remotePlayers : new Map();
 
+      if (gameStateRef.current === 'PLAYING' && interiorOpenRef.current) {
+        engine.advanceLifeClockWhileIndoors(dt);
+      }
+
       if (
         gameStateRef.current === 'PLAYING' &&
         !interiorOpenRef.current &&
@@ -793,6 +797,7 @@ export default function App() {
           character={character}
           job={hud.life.job}
           isMobile={effectiveMobile}
+          minuteOfDay={hud.life.minuteOfDay}
           completedTaskIds={hud.life.completedInteriorTasks ?? []}
           onClose={() => setInteriorLocation(null)}
           onCompleteTask={(taskId) => {

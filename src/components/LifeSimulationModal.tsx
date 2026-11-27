@@ -2,6 +2,7 @@ import React from 'react';
 import { BookOpen, Briefcase, Coffee, DoorOpen, Droplets, Heart, Home, Moon, ShoppingBasket, ShowerHead, Users, Wallet, X } from 'lucide-react';
 import type { LifeAction, LifeJobId, LifeLocation, LifeSimulationSnapshot } from '../game/types.ts';
 import { getRequiredWorkplace } from '../game/lifeSimulation.ts';
+import { LIFE_LOCATIONS } from '../game/world.ts';
 
 interface LifeSimulationModalProps {
   open: boolean;
@@ -146,6 +147,36 @@ export const LifeSimulationModal: React.FC<LifeSimulationModalProps> = ({
             <span>Água: <strong className="text-white">{life.waterBottles}</strong></span>
             <span>Relações sociais: <strong className="text-white">{life.socialProgress}%</strong></span>
             <span>Estudo: <strong className="text-white">{life.studyProgress}</strong></span>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-violet-400/20 bg-violet-400/5 p-3 sm:p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="flex items-center gap-2 text-sm font-bold text-white"><Heart className="h-4 w-4 text-violet-300" /> Relações na cidade</h3>
+            <span className="text-[10px] text-slate-400">Memória das conversas</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {LIFE_LOCATIONS.map((resident) => {
+              const score = Math.round(life.npcRelationships?.[resident.id] ?? 0);
+              const memories = life.npcMemories?.[resident.id] ?? [];
+              const last = memories[memories.length - 1];
+              const topic = last === 'work-opportunities' ? 'Última conversa: oportunidades de trabalho'
+                : last === 'local-recommendations' ? 'Última conversa: recomendações locais'
+                  : last === 'friendly-chat' ? 'Última conversa: convívio e vizinhança'
+                    : 'Ainda não conversaram';
+              return (
+                <div key={resident.id} className="rounded-lg border border-white/10 bg-slate-950/55 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-white">{resident.npcName}</span>
+                    <span className="text-[10px] font-mono text-violet-200">{score}/100</span>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-700">
+                    <div className="h-full rounded-full bg-violet-400" style={{ width: `${score}%` }} />
+                  </div>
+                  <p className="mt-2 text-[10px] text-slate-400">{topic}</p>
+                </div>
+              );
+            })}
           </div>
         </div>
 

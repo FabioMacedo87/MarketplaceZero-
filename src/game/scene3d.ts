@@ -30,6 +30,7 @@ import {
   createWaterNormalTexture,
 } from './textures.ts';
 import { PROFESSIONS } from './professions.ts';
+import { getOutdoorNpcSchedule } from './npcSchedules.ts';
 import type { CameraMode, CharacterId, LifeLocation, ProfessionId, RemotePlayer } from './types.ts';
 import type { LeonidaEngine } from './engine.ts';
 import {
@@ -1155,6 +1156,8 @@ export class LeonidaScene3D {
         location.npcName,
         location.npcColor,
       );
+      const initialRoutine = getOutdoorNpcSchedule(location.kind, 450);
+      rig.group.position.set((location.x + initialRoutine.x) * WORLD_SCALE, 0, (location.y + initialRoutine.y) * WORLD_SCALE);
       this.lifeLocationNpcs.set(location.id, rig);
       this.scene.add(rig.group);
     }
@@ -1176,21 +1179,28 @@ export class LeonidaScene3D {
     }
   }
 
-  private syncLifeLocationNpcs(engine: LeonidaEngine, nowSec: number) {
+  private syncLifeLocationNpcs(engine: LeonidaEngine, nowSec: number, dt: number) {
+    const safeDt = Math.min(Math.max(dt, 0), 0.05);
     LIFE_LOCATIONS.forEach((location, index) => {
       const rig = this.lifeLocationNpcs.get(location.id);
       if (!rig) return;
-      const offset = location.kind === 'cafe' || location.kind === 'market' ? 22 : 18;
-      rig.group.position.set(
-        (location.x + offset) * WORLD_SCALE,
-        0,
-        (location.y + 14) * WORLD_SCALE,
-      );
-      rig.group.rotation.y = -Math.atan2(
-        engine.player.y - (location.y + 14),
-        engine.player.x - (location.x + offset),
-      );
-      animateCharacterRig(rig, 0, false, false, nowSec, index * 1.65);
+      const routine = getOutdoorNpcSchedule(location.kind, engine.life.minuteOfDay);
+      const targetX = (location.x + routine.x) * WORLD_SCALE;
+      const targetZ = (location.y + routine.y) * WORLD_SCALE;
+      const dx = targetX - rig.group.position.x;
+      const dz = targetZ - rig.group.position.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance > 0.035) {
+        const travel = Math.min(distance, safeDt * 0.72);
+        rig.group.position.x += (dx / distance) * travel;
+        rig.group.position.z += (dz / distance) * travel;
+        rig.group.rotation.y = Math.atan2(dx, dz);
+      } else {
+        const faceX = engine.player.x * WORLD_SCALE - rig.group.position.x;
+        const faceZ = engine.player.y * WORLD_SCALE - rig.group.position.z;
+        rig.group.rotation.y = Math.atan2(faceX, faceZ);
+      }
+      animateCharacterRig(rig, distance > 0.035 ? 22 : 0, false, false, nowSec, index * 1.65);
     });
   }
 
@@ -1287,7 +1297,7 @@ export class LeonidaScene3D {
     this.syncPlayer(engine, nowSec);
     this.syncPedestrians(engine, nowSec);
     this.syncLifeLocationMarkers(engine, nowSec);
-    this.syncLifeLocationNpcs(engine, nowSec);
+    this.syncLifeLocationNpcs(engine, nowSec, dt);
     this.syncGuards(engine, nowSec);
     this.syncRemotePlayers(remotePlayers, dt, nowSec);
     this.syncPickups(engine, nowSec);
