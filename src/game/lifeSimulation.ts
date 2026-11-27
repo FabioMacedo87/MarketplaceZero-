@@ -1,4 +1,4 @@
-import type { LifeAction, LifeJobId, LifeLocationKind, LifeSimulationSnapshot } from './types.ts';
+import type { LifeAction, LifeContract, LifeJobId, LifeLocationKind, LifeSimulationSnapshot } from './types.ts';
 
 const STORAGE_KEY = 'portugal-life-save-v1';
 const JOB_PAY: Record<LifeJobId, number> = {
@@ -28,6 +28,10 @@ export function createInitialLifeSimulation(): LifeSimulationSnapshot {
     completedInteriorTasks: [],
     npcRelationships: {},
     npcMemories: {},
+    cityDemand: { home: 42, cafe: 62, market: 66, garden: 48, depot: 56, construction: 60 },
+    lifeContracts: createDailyLifeContracts(1, { home: 42, cafe: 62, market: 66, garden: 48, depot: 56, construction: 60 }),
+    activeLifeContractId: null,
+    completedLifeContracts: 0,
   };
 }
 
@@ -49,6 +53,61 @@ const JOB_WORKPLACE: Record<LifeJobId, LifeLocationKind> = {
   gardener: 'garden',
   construction: 'construction',
 };
+
+const CONTRACT_INFO: Record<LifeJobId, { title: string; description: string; workplace: LifeLocationKind; residentId: string }> = {
+  barista: { title: 'Reforço de serviço na Ribeira', description: 'Cumpre um turno de atendimento e ajuda o café a responder à procura.', workplace: 'cafe', residentId: 'cafe-ribeira' },
+  retail: { title: 'Reposição urgente no Bolhão', description: 'Ajuda a organizar as bancas e a manter o mercado abastecido.', workplace: 'market', residentId: 'mercado-bolhao' },
+  courier: { title: 'Distribuição entre margens', description: 'Apoia a operação logística e prepara as entregas do dia.', workplace: 'depot', residentId: 'depot-gaia' },
+  gardener: { title: 'Manutenção da Cordoaria', description: 'Ajuda a equipa a cuidar dos canteiros e dos caminhos do jardim.', workplace: 'garden', residentId: 'jardim-cordoaria' },
+  construction: { title: 'Obra de melhoria na Boavista', description: 'Reforça a equipa numa tarefa de manutenção e construção urbana.', workplace: 'construction', residentId: 'construction-boavista' },
+};
+
+const VALID_LOCATION_KINDS: LifeLocationKind[] = ['home', 'cafe', 'market', 'garden', 'depot', 'construction'];
+
+export function createDailyLifeContracts(
+  day: number,
+  cityDemand: Record<LifeLocationKind, number>,
+): LifeContract[] {
+  return VALID_JOBS.map((job, index) => {
+    const info = CONTRACT_INFO[job];
+    const demand = Math.max(0, Math.min(100, cityDemand[info.workplace] ?? 50));
+    const dayVariation = ((day + index * 2) % 5) * 2;
+    const reward = Math.round(JOB_PAY[job] * 0.82 + demand * 0.16 + 12 + dayVariation);
+    return {
+      id: 'life-contract-' + day + '-' + job,
+      job,
+      title: info.title,
+      description: info.description,
+      workplace: info.workplace,
+      reward,
+      expiresOnDay: day + 1,
+      residentId: info.residentId,
+    };
+  });
+}
+
+export function getLifeSupplyPrice(life: LifeSimulationSnapshot): number {
+  const demand = life.cityDemand?.market ?? 50;
+  const relationship = life.npcRelationships?.['mercado-bolhao'] ?? 0;
+  const discount = relationship >= 70 ? 0.15 : relationship >= 40 ? 0.07 : 0;
+  return Math.round(18 * (0.8 + demand * 0.004) * (1 - discount) * 100) / 100;
+}
+
+export function getLifeMealPrice(life: LifeSimulationSnapshot): number {
+  const demand = life.cityDemand?.cafe ?? 50;
+  const relationship = life.npcRelationships?.['cafe-ribeira'] ?? 0;
+  const discount = relationship >= 70 ? 0.12 : relationship >= 40 ? 0.05 : 0;
+  return Math.round(7.5 * (0.8 + demand * 0.004) * (1 - discount) * 100) / 100;
+}
+
+export function getLifeShiftPay(life: LifeSimulationSnapshot, job: LifeJobId = life.job): number {
+  const workplace = JOB_WORKPLACE[job];
+  const demand = life.cityDemand?.[workplace] ?? 50;
+  const residentId = CONTRACT_INFO[job].residentId;
+  const relationship = life.npcRelationships?.[residentId] ?? 0;
+  const trustBonus = relationship >= 75 ? 0.08 : relationship >= 45 ? 0.04 : 0;
+  return Math.round(JOB_PAY[job] * (0.85 + demand * 0.003) * (1 + trustBonus));
+}
 
 const ACTION_WORKPLACE: Partial<Record<LifeAction, LifeLocationKind>> = {
   sleep: 'home',
@@ -76,6 +135,23 @@ export function advanceLifeSimulation(
     day += 1;
   }
 
+  const cityDemand = { ...current.cityDemand };
+  let lifeContracts = [...current.lifeContracts];
+  let activeLifeContractId = current.activeLifeContractId;
+  if (day > current.day) {
+    for (const kind of VALID_LOCATION_KINDS) {
+      const previous = cityDemand[kind] ?? 50;
+      const driftToAverage = (50 - previous) * 0.08;
+      const dailyVariation = (((day + VALID_LOCATION_KINDS.indexOf(kind) * 2) % 5) - 2) * 1.5;
+      cityDemand[kind] = clamp(previous + driftToAverage + dailyVariation, 20, 85);
+    }
+    const active = lifeContracts.find((contract) => contract.id === activeLifeContractId);
+    lifeContracts = createDailyLifeContracts(day, cityDemand);
+    if (active && active.expiresOnDay >= day) lifeContracts.push(active);
+    else activeLifeContractId = null;
+  }
+  lifeContracts = lifeContracts.filter((contract) => contract.expiresOnDay >= day);
+
   const hunger = clamp(current.hunger - minutes * 0.09);
   const thirst = clamp(current.thirst - minutes * 0.13);
   const energy = clamp(current.energy - minutes * 0.055);
@@ -88,6 +164,9 @@ export function advanceLifeSimulation(
     day,
     minuteOfDay,
     completedInteriorTasks: day > current.day ? [] : [...current.completedInteriorTasks],
+    cityDemand,
+    lifeContracts,
+    activeLifeContractId,
     hunger,
     thirst,
     energy,
@@ -189,30 +268,41 @@ export function performLifeAction(
       life.thirst = clamp(life.thirst + 48);
       return { ok: true, message: 'Bebeste água e recuperaste hidratação.', life, cash };
     case 'buy_supplies': {
-      const payment = payFromAvailableFunds(life, cash, 18);
-      if (!payment.ok) return fail('Saldo insuficiente para comprar mantimentos.');
-      life = { ...payment.life, groceries: life.groceries + 4, waterBottles: life.waterBottles + 6 };
+      const price = getLifeSupplyPrice(life);
+      const payment = payFromAvailableFunds(life, cash, price);
+      if (!payment.ok) return fail('Saldo insuficiente para comprar mantimentos (' + price.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' }) + ').');
+      life = {
+        ...payment.life,
+        groceries: life.groceries + 4,
+        waterBottles: life.waterBottles + 6,
+        cityDemand: { ...life.cityDemand, market: clamp((life.cityDemand.market ?? 50) + 2, 0, 100) },
+      };
       cash = payment.cash;
-      return { ok: true, message: 'Compraste alimentos e água para casa (-18 €).', life, cash };
+      return { ok: true, message: 'Compraste alimentos e água para casa (-' + price.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' }) + ').', life, cash };
     }
     case 'eat_out': {
-      const payment = payFromAvailableFunds(life, cash, 7.5);
-      if (!payment.ok) return fail('Saldo insuficiente para pagar uma refeição.');
+      const price = getLifeMealPrice(life);
+      const payment = payFromAvailableFunds(life, cash, price);
+      if (!payment.ok) return fail('Saldo insuficiente para pagar uma refeição (' + price.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' }) + ').');
       life = advanceLifeSimulation(payment.life, 25);
       life.hunger = clamp(life.hunger + 46);
       life.mood = clamp(life.mood + 9);
+      life.cityDemand = { ...life.cityDemand, cafe: clamp((life.cityDemand.cafe ?? 50) + 2, 0, 100) };
       cash = payment.cash;
-      return { ok: true, message: 'Fizeste uma refeição num café do Porto (-7,50 €).', life, cash };
+      return { ok: true, message: 'Fizeste uma refeição num café do Porto (-' + price.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' }) + ').', life, cash };
     }
     case 'work_shift': {
       if (life.energy < 25) return fail('Estás demasiado cansado para iniciar um turno.');
+      const shiftPay = getLifeShiftPay(life);
+      const workplace = JOB_WORKPLACE[life.job];
       life = advanceLifeSimulation(life, 240);
       life.energy = clamp(life.energy - 8);
       life.jobExperience += 1;
-      life.bankBalance += JOB_PAY[life.job];
+      life.bankBalance += shiftPay;
+      life.cityDemand = { ...life.cityDemand, [workplace]: clamp((life.cityDemand[workplace] ?? 50) - 3, 0, 100) };
       return {
         ok: true,
-        message: `Turno de 4 horas concluído. Recebeste ${JOB_PAY[life.job]} € na conta bancária.`,
+        message: `Turno de 4 horas concluído. Recebeste ${shiftPay.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })} na conta bancária, ajustado à procura local.`,
         life,
         cash,
       };
@@ -253,12 +343,39 @@ export function loadLifeSave(): { life: LifeSimulationSnapshot; cash: number } |
     const parsed = JSON.parse(raw) as { life?: Partial<LifeSimulationSnapshot>; cash?: number };
     if (!parsed.life || typeof parsed.life !== 'object') return null;
     const defaults = createInitialLifeSimulation();
+    const savedDay = safeNumber(parsed.life.day, defaults.day, 1, 100000);
+    const rawDemand = (parsed.life.cityDemand ?? {}) as Partial<Record<LifeLocationKind, unknown>>;
+    const cityDemand: Record<LifeLocationKind, number> = {
+      home: safeNumber(rawDemand.home, defaults.cityDemand.home, 0, 100),
+      cafe: safeNumber(rawDemand.cafe, defaults.cityDemand.cafe, 0, 100),
+      market: safeNumber(rawDemand.market, defaults.cityDemand.market, 0, 100),
+      garden: safeNumber(rawDemand.garden, defaults.cityDemand.garden, 0, 100),
+      depot: safeNumber(rawDemand.depot, defaults.cityDemand.depot, 0, 100),
+      construction: safeNumber(rawDemand.construction, defaults.cityDemand.construction, 0, 100),
+    };
+    const lifeContracts: LifeContract[] = Array.isArray(parsed.life.lifeContracts)
+      ? parsed.life.lifeContracts.filter((value): value is LifeContract => {
+          if (!value || typeof value !== 'object') return false;
+          const contract = value as Partial<LifeContract>;
+          return typeof contract.id === 'string' && /^life-contract-[0-9]+-[a-z]+$/.test(contract.id)
+            && VALID_JOBS.includes(contract.job as LifeJobId)
+            && VALID_LOCATION_KINDS.includes(contract.workplace as LifeLocationKind)
+            && typeof contract.title === 'string' && typeof contract.description === 'string'
+            && typeof contract.reward === 'number' && Number.isFinite(contract.reward)
+            && typeof contract.expiresOnDay === 'number' && Number.isFinite(contract.expiresOnDay)
+            && typeof contract.residentId === 'string' && /^[a-z0-9-]{2,48}$/.test(contract.residentId);
+        }).slice(0, 8)
+      : createDailyLifeContracts(savedDay, cityDemand);
+    const savedActiveContractId = typeof parsed.life.activeLifeContractId === 'string'
+      && lifeContracts.some((contract) => contract.id === parsed.life?.activeLifeContractId)
+      ? parsed.life.activeLifeContractId
+      : null;
     const job = VALID_JOBS.includes(parsed.life.job as LifeJobId)
       ? (parsed.life.job as LifeJobId)
       : defaults.job;
     return {
       life: {
-        day: safeNumber(parsed.life.day, defaults.day, 1, 100000),
+        day: savedDay,
         minuteOfDay: safeNumber(parsed.life.minuteOfDay, defaults.minuteOfDay, 0, 1439.999),
         energy: safeNumber(parsed.life.energy, defaults.energy, 0, 100),
         hunger: safeNumber(parsed.life.hunger, defaults.hunger, 0, 100),
@@ -289,6 +406,10 @@ export function loadLifeSave(): { life: LifeSimulationSnapshot; cash: number } |
                 .filter((tag): tag is string => typeof tag === 'string' && /^[a-z0-9-]{2,40}$/.test(tag))
                 .slice(-12)]))
           : {},
+        cityDemand,
+        lifeContracts,
+        activeLifeContractId: savedActiveContractId,
+        completedLifeContracts: safeNumber(parsed.life.completedLifeContracts, 0, 0, 1000000),
       },
       cash: safeNumber(parsed.cash, 650, 0, 100000000),
     };
@@ -300,7 +421,7 @@ export function loadLifeSave(): { life: LifeSimulationSnapshot; cash: number } |
 export function saveLifeSave(life: LifeSimulationSnapshot, cash: number): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, life, cash }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 4, life, cash }));
   } catch {
     // Storage can be unavailable in private browsing or when device storage is full.
   }

@@ -87,6 +87,8 @@ export const LIFE_LOCATIONS: LifeLocation[] = [
     npcRole: 'Vizinha',
     npcColor: '#34D399',
     npcShirtColor: '#0F766E',
+    npcPersonality: 'Paciente, observadora e protetora da vizinhança',
+    npcAmbition: 'manter o bairro unido e acolhedor',
   },
   {
     id: 'cafe-ribeira',
@@ -102,6 +104,8 @@ export const LIFE_LOCATIONS: LifeLocation[] = [
     npcRole: 'Barista',
     npcColor: '#F59E0B',
     npcShirtColor: '#B45309',
+    npcPersonality: 'Energética, comunicativa e criativa',
+    npcAmbition: 'transformar o café num ponto de encontro cultural',
   },
   {
     id: 'mercado-bolhao',
@@ -117,6 +121,8 @@ export const LIFE_LOCATIONS: LifeLocation[] = [
     npcRole: 'Comerciante',
     npcColor: '#38BDF8',
     npcShirtColor: '#1D4ED8',
+    npcPersonality: 'Tradicional, pragmático e exigente com a qualidade',
+    npcAmbition: 'manter os pequenos comerciantes do Bolhão competitivos',
   },
   {
     id: 'jardim-cordoaria',
@@ -132,6 +138,8 @@ export const LIFE_LOCATIONS: LifeLocation[] = [
     npcRole: 'Jardineira',
     npcColor: '#4ADE80',
     npcShirtColor: '#166534',
+    npcPersonality: 'Serena, comunitária e defensora do ambiente',
+    npcAmbition: 'tornar a Cordoaria um jardim cuidado por todos',
   },
   {
     id: 'depot-gaia',
@@ -147,6 +155,8 @@ export const LIFE_LOCATIONS: LifeLocation[] = [
     npcRole: 'Despachante',
     npcColor: '#A78BFA',
     npcShirtColor: '#6D28D9',
+    npcPersonality: 'Metódico, direto e orientado para resultados',
+    npcAmbition: 'criar uma rede logística eficiente entre as duas margens',
   },
   {
     id: 'construction-boavista',
@@ -162,6 +172,8 @@ export const LIFE_LOCATIONS: LifeLocation[] = [
     npcRole: 'Encarregado',
     npcColor: '#FB923C',
     npcShirtColor: '#9A3412',
+    npcPersonality: 'Direto, trabalhador e atento à segurança',
+    npcAmbition: 'modernizar o estaleiro sem comprometer a equipa',
   },
 ];
 

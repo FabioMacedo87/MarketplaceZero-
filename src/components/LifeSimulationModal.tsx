@@ -1,7 +1,7 @@
 import React from 'react';
 import { BookOpen, Briefcase, Coffee, DoorOpen, Droplets, Heart, Home, Moon, ShoppingBasket, ShowerHead, Users, Wallet, X } from 'lucide-react';
 import type { LifeAction, LifeJobId, LifeLocation, LifeSimulationSnapshot } from '../game/types.ts';
-import { getRequiredWorkplace } from '../game/lifeSimulation.ts';
+import { getLifeMealPrice, getLifeShiftPay, getLifeSupplyPrice, getRequiredWorkplace } from '../game/lifeSimulation.ts';
 import { LIFE_LOCATIONS } from '../game/world.ts';
 
 interface LifeSimulationModalProps {
@@ -14,6 +14,8 @@ interface LifeSimulationModalProps {
   onTalkToNpc: () => void;
   onEnterInterior: () => void;
   onSelectJob: (job: LifeJobId) => void;
+  onAcceptContract: (contractId: string) => void;
+  onCancelContract: () => void;
 }
 
 const JOBS: { id: LifeJobId; label: string; description: string }[] = [
@@ -32,6 +34,23 @@ const NEEDS: { key: 'energy' | 'hunger' | 'thirst' | 'hygiene' | 'mood'; label: 
   { key: 'mood', label: 'Bem-estar', color: 'bg-violet-400' },
 ];
 
+function formatMoney(value: number): string {
+  return value.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' });
+}
+
+function demandLabel(value: number): string {
+  if (value >= 70) return 'Procura elevada';
+  if (value >= 45) return 'Procura estável';
+  return 'Procura reduzida';
+}
+
+function relationshipLabel(value: number): string {
+  if (value >= 80) return 'Confiança';
+  if (value >= 50) return 'Amizade';
+  if (value >= 20) return 'Conhecido';
+  return 'Por conhecer';
+}
+
 function formatClock(minutes: number): string {
   const whole = Math.floor(minutes);
   const hours = Math.floor(whole / 60);
@@ -49,6 +68,8 @@ export const LifeSimulationModal: React.FC<LifeSimulationModalProps> = ({
   onTalkToNpc,
   onEnterInterior,
   onSelectJob,
+  onAcceptContract,
+  onCancelContract,
 }) => {
   if (!open) return null;
   const currentJob = JOBS.find((job) => job.id === life.job) ?? JOBS[0];
@@ -163,17 +184,88 @@ export const LifeSimulationModal: React.FC<LifeSimulationModalProps> = ({
               const topic = last === 'work-opportunities' ? 'Última conversa: oportunidades de trabalho'
                 : last === 'local-recommendations' ? 'Última conversa: recomendações locais'
                   : last === 'friendly-chat' ? 'Última conversa: convívio e vizinhança'
-                    : 'Ainda não conversaram';
+                    : last === 'conflict' ? 'Última conversa: houve um conflito'
+                      : last === 'reconciliation' ? 'Última conversa: mal-entendido resolvido'
+                        : 'Ainda não conversaram';
               return (
                 <div key={resident.id} className="rounded-lg border border-white/10 bg-slate-950/55 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-white">{resident.npcName}</span>
-                    <span className="text-[10px] font-mono text-violet-200">{score}/100</span>
+                    <span className="text-[10px] font-mono text-violet-200">{relationshipLabel(score)} · {score}/100</span>
                   </div>
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-700">
                     <div className="h-full rounded-full bg-violet-400" style={{ width: `${score}%` }} />
                   </div>
                   <p className="mt-2 text-[10px] text-slate-400">{topic}</p>
+                  <p className="mt-2 text-[10px] text-slate-300">Personalidade: {resident.npcPersonality ?? 'Por descobrir'}</p>
+                  <p className="mt-1 text-[10px] text-slate-400">Objetivo: {resident.npcAmbition ?? 'Ainda não partilhado'}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-3 sm:p-4">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2"><Briefcase className="h-4 w-4 text-emerald-300" /> Economia local e contratos</h3>
+            <span className="text-[10px] text-slate-400">{life.completedLifeContracts ?? 0} contratos concluídos</span>
+          </div>
+          <p className="mt-1 text-[10px] text-slate-400">A procura altera os preços, os salários e as oportunidades. As tendências ajustam-se ao longo dos dias.</p>
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {LIFE_LOCATIONS.map((market) => {
+              const demand = Math.round(life.cityDemand?.[market.kind] ?? 50);
+              return (
+                <div key={market.id} className="rounded-lg border border-white/10 bg-slate-950/60 p-2">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] font-semibold text-white">{market.label}</span>
+                    <span className="text-[10px] font-mono text-emerald-200">{demand}</span>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-700">
+                    <div className="h-full rounded-full bg-emerald-400" style={{ width: `${demand}%` }} />
+                  </div>
+                  <p className="mt-1 text-[9px] text-slate-400">{demandLabel(demand)}</p>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-xs font-bold text-white">Quadro de oportunidades</h4>
+              <p className="text-[10px] text-slate-400">Aceita um contrato compatível com a tua atividade e termina um turno no local indicado.</p>
+            </div>
+            {life.activeLifeContractId && (
+              <button type="button" onClick={onCancelContract} className="min-h-8 rounded-lg border border-rose-400/30 px-3 text-[10px] font-semibold text-rose-200 hover:bg-rose-400/10">Cancelar contrato ativo</button>
+            )}
+          </div>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {(life.lifeContracts ?? []).map((contract) => {
+              const contractJob = JOBS.find((job) => job.id === contract.job) ?? JOBS[0];
+              const workplace = LIFE_LOCATIONS.find((item) => item.kind === contract.workplace);
+              const isActive = life.activeLifeContractId === contract.id;
+              const isExpired = contract.expiresOnDay < life.day;
+              const isJobMatch = life.job === contract.job;
+              const lockedByOther = Boolean(life.activeLifeContractId && !isActive);
+              return (
+                <div key={contract.id} className={`rounded-lg border p-3 ${isActive ? 'border-emerald-400/50 bg-emerald-400/10' : 'border-white/10 bg-slate-950/60'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-xs font-semibold text-white">{contract.title}</span>
+                    <span className="shrink-0 text-xs font-bold text-emerald-200">{formatMoney(contract.reward)}</span>
+                  </div>
+                  <p className="mt-1 text-[10px] text-slate-300">{contract.description}</p>
+                  <p className="mt-2 text-[10px] text-slate-400">Profissão: {contractJob.label} · Local: {workplace?.label ?? contract.workplace}</p>
+                  <p className="mt-1 text-[10px] text-slate-500">Prazo: até ao dia {contract.expiresOnDay}</p>
+                  {isActive ? (
+                    <p className="mt-2 text-[10px] font-semibold text-emerald-200">Contrato aceite · conclui um turno no local indicado</p>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isExpired || lockedByOther || !isJobMatch}
+                      onClick={() => onAcceptContract(contract.id)}
+                      className="mt-3 min-h-9 w-full rounded-lg bg-emerald-300 px-3 text-[11px] font-bold text-slate-950 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {isExpired ? 'Contrato expirado' : lockedByOther ? 'Já tens um contrato ativo' : !isJobMatch ? 'Seleciona esta profissão' : 'Aceitar contrato'}
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -187,8 +279,8 @@ export const LifeSimulationModal: React.FC<LifeSimulationModalProps> = ({
             <ActionButton icon={<ShowerHead className="w-4 h-4" />} title="Tomar banho" subtitle={atHome ? '20 minutos · Recupera higiene' : 'Disponível no Apartamento do Porto'} disabled={!atHome} onClick={() => onAction('shower')} />
             <ActionButton icon={<Coffee className="w-4 h-4" />} title="Cozinhar em casa" subtitle={atHome ? 'Usa mantimentos · Recupera fome' : 'Disponível no Apartamento do Porto'} disabled={!atHome || life.groceries < 1} onClick={() => onAction('cook')} />
             <ActionButton icon={<Droplets className="w-4 h-4" />} title="Beber água" subtitle="Usa uma garrafa · Recupera hidratação" disabled={life.waterBottles < 1} onClick={() => onAction('drink')} />
-            <ActionButton icon={<ShoppingBasket className="w-4 h-4" />} title="Comprar mantimentos" subtitle={atMarket ? '18 € · 4 refeições e 6 garrafas de água' : 'Disponível no Mercado do Bolhão'} disabled={!atMarket} onClick={() => onAction('buy_supplies')} />
-            <ActionButton icon={<Coffee className="w-4 h-4" />} title="Comer fora" subtitle={atCafe ? '7,50 € · Refeição e bem-estar' : 'Disponível no Café da Ribeira'} disabled={!atCafe} onClick={() => onAction('eat_out')} />
+            <ActionButton icon={<ShoppingBasket className="w-4 h-4" />} title="Comprar mantimentos" subtitle={atMarket ? formatMoney(getLifeSupplyPrice(life)) + ' · 4 refeições e 6 garrafas de água' : 'Preço atual: ' + formatMoney(getLifeSupplyPrice(life)) + ' · Disponível no Mercado do Bolhão'} disabled={!atMarket} onClick={() => onAction('buy_supplies')} />
+            <ActionButton icon={<Coffee className="w-4 h-4" />} title="Comer fora" subtitle={atCafe ? formatMoney(getLifeMealPrice(life)) + ' · Refeição e bem-estar' : 'Preço atual: ' + formatMoney(getLifeMealPrice(life)) + ' · Disponível no Café da Ribeira'} disabled={!atCafe} onClick={() => onAction('eat_out')} />
           </div>
 
           <div className="space-y-2">
@@ -197,7 +289,7 @@ export const LifeSimulationModal: React.FC<LifeSimulationModalProps> = ({
             <select id="life-job" value={life.job} onChange={(event) => onSelectJob(event.target.value as LifeJobId)} className="w-full rounded-lg bg-slate-800 border border-white/15 px-3 py-2.5 text-sm text-white">
               {JOBS.map((job) => <option key={job.id} value={job.id}>{job.label} — {job.description}</option>)}
             </select>
-            <ActionButton icon={<Briefcase className="w-4 h-4" />} title="Fazer turno de trabalho" subtitle={canWorkHere ? '4 horas · Salário depositado no banco' : 'Trabalho disponível em ' + requiredWorkplace} disabled={!canWorkHere || life.energy < 25} onClick={() => onAction('work_shift')} />
+            <ActionButton icon={<Briefcase className="w-4 h-4" />} title="Fazer turno de trabalho" subtitle={canWorkHere ? '4 horas · ' + formatMoney(getLifeShiftPay(life)) + ' para o banco, ajustados à procura' : 'Trabalho disponível em ' + requiredWorkplace} disabled={!canWorkHere || life.energy < 25} onClick={() => onAction('work_shift')} />
             <ActionButton icon={<Users className="w-4 h-4" />} title="Socializar" subtitle="30 minutos · Melhora o bem-estar" onClick={() => onAction('socialise')} />
             <ActionButton icon={<BookOpen className="w-4 h-4" />} title="Estudar / aprender" subtitle="1 hora · Desenvolve competências" disabled={life.energy < 15} onClick={() => onAction('study')} />
             <ActionButton icon={<Wallet className="w-4 h-4" />} title="Levantar 50 €" subtitle="Transferência do banco para a carteira" disabled={life.bankBalance < 50} onClick={() => onAction('withdraw_50')} />

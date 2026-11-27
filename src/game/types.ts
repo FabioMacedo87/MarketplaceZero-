@@ -30,6 +30,8 @@ export interface LifeLocation {
   npcRole: string;
   npcColor: string;
   npcShirtColor: string;
+  npcPersonality?: string;
+  npcAmbition?: string;
 }
 
 export type LifeAction =
@@ -43,6 +45,17 @@ export type LifeAction =
   | 'socialise'
   | 'study'
   | 'withdraw_50';
+
+export interface LifeContract {
+  id: string;
+  job: LifeJobId;
+  title: string;
+  description: string;
+  workplace: LifeLocationKind;
+  reward: number;
+  expiresOnDay: number;
+  residentId: string;
+}
 
 export interface LifeSimulationSnapshot {
   day: number;
@@ -63,6 +76,10 @@ export interface LifeSimulationSnapshot {
   completedInteriorTasks: string[];
   npcRelationships: Record<string, number>;
   npcMemories: Record<string, string[]>;
+  cityDemand: Record<LifeLocationKind, number>;
+  lifeContracts: LifeContract[];
+  activeLifeContractId: string | null;
+  completedLifeContracts: number;
 }
 
 export type MiniGameKind = 'cargo_seal' | 'ledger_trade' | 'medical_triage' | 'psp_inspection' | 'conversation';
@@ -73,6 +90,7 @@ export interface NpcOption {
   cashBonus: number;
   repBonus: number;
   memoryTag?: string;
+  relationshipDelta?: number;
 }
 
 export interface ActiveLandmarkActivity {
@@ -89,6 +107,7 @@ export interface ActiveLandmarkActivity {
   phase: 'dialogue' | 'minigame';
   selectedOptionReply: string | null;
   selectedOptionMemory?: string;
+  selectedRelationshipDelta?: number;
   bonusCash: number;
   bonusRep: number;
   pspTarget?: PspTargetInfo;

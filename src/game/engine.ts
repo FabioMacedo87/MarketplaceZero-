@@ -526,16 +526,76 @@ export class LeonidaEngine {
   }
 
   public performLifeAction(action: LifeAction, locationKind: LifeLocationKind | null = null) {
+    const acceptedContract = action === 'work_shift' && this.life.activeLifeContractId
+      ? this.life.lifeContracts.find((contract) => contract.id === this.life.activeLifeContractId) ?? null
+      : null;
     const result = performLifeAction(this.life, this.player.cash, action, locationKind);
     if (!result.ok) {
       this.showToast(result.message, 3.2);
       return result;
     }
+
     this.life = result.life;
     this.player.cash = result.cash;
+    let message = result.message;
+
+    if (acceptedContract && acceptedContract.job === this.life.job && acceptedContract.workplace === locationKind) {
+      const previousRelationship = this.life.npcRelationships[acceptedContract.residentId] ?? 0;
+      const contractRelationship = clamp(previousRelationship + 6);
+      this.life = {
+        ...this.life,
+        bankBalance: this.life.bankBalance + acceptedContract.reward,
+        completedLifeContracts: this.life.completedLifeContracts + 1,
+        activeLifeContractId: null,
+        lifeContracts: this.life.lifeContracts.filter((contract) => contract.id !== acceptedContract.id),
+        cityDemand: {
+          ...this.life.cityDemand,
+          [acceptedContract.workplace]: clamp((this.life.cityDemand[acceptedContract.workplace] ?? 50) - 5, 0, 100),
+        },
+        npcRelationships: {
+          ...this.life.npcRelationships,
+          [acceptedContract.residentId]: contractRelationship,
+        },
+      };
+      this.player.reputation += 4;
+      message += ` Contrato concluído: +${acceptedContract.reward} € no banco. Relação com o cliente: ${contractRelationship}/100.`;
+    }
+
     saveLifeSave(this.life, this.player.cash);
-    this.showToast(result.message, 3.2);
-    return result;
+    this.showToast(message, 3.6);
+    return { ...result, message, life: this.life, cash: this.player.cash };
+  }
+
+  public acceptLifeContract(contractId: string) {
+    if (this.life.activeLifeContractId) {
+      this.showToast('Já tens um contrato ativo. Conclui-o ou cancela-o antes de aceitar outro.', 3);
+      return;
+    }
+    const contract = this.life.lifeContracts.find((item) => item.id === contractId);
+    if (!contract || contract.expiresOnDay < this.life.day) {
+      this.showToast('Este contrato já não está disponível. Consulta as novas oportunidades.', 3);
+      return;
+    }
+    if (contract.job !== this.life.job) {
+      this.showToast('Seleciona primeiro a atividade profissional exigida pelo contrato.', 3);
+      return;
+    }
+    this.life = { ...this.life, activeLifeContractId: contract.id };
+    saveLifeSave(this.life, this.player.cash);
+    this.showToast(`Contrato aceite: ${contract.title}. Vai trabalhar no local indicado.`, 3.2);
+  }
+
+  public cancelLifeContract() {
+    const activeId = this.life.activeLifeContractId;
+    if (!activeId) return;
+    const contract = this.life.lifeContracts.find((item) => item.id === activeId);
+    this.life = {
+      ...this.life,
+      activeLifeContractId: null,
+      lifeContracts: this.life.lifeContracts.filter((item) => item.id !== activeId),
+    };
+    saveLifeSave(this.life, this.player.cash);
+    this.showToast(contract ? `Contrato cancelado: ${contract.title}.` : 'Contrato cancelado.', 2.8);
   }
 
   public completeInteriorTask(
@@ -774,6 +834,7 @@ export class LeonidaEngine {
     this.activeActivity.bonusCash = opt.cashBonus;
     this.activeActivity.bonusRep = opt.repBonus;
     this.activeActivity.selectedOptionMemory = opt.memoryTag ?? 'friendly-chat';
+    this.activeActivity.selectedRelationshipDelta = opt.relationshipDelta;
     soundEngine.playPickup();
   }
 
@@ -792,15 +853,17 @@ export class LeonidaEngine {
     const perf = clamp(performanceMul, 0.5, 1.5);
 
     if (act.id.startsWith('life-location-')) {
-      const socialGain = Math.max(2, Math.round(act.bonusRep * perf));
+      const baseSocialGain = Math.max(2, Math.round(act.bonusRep * perf));
       const location = LIFE_LOCATIONS.find((item) => act.id.startsWith(`life-location-${item.id}-`));
+      const relationshipDelta = act.selectedRelationshipDelta ?? Math.max(1, Math.round(baseSocialGain * 0.8));
+      const socialGain = relationshipDelta < 0 ? 0 : baseSocialGain;
       this.life = advanceLifeSimulation(this.life, 10);
       this.life.socialProgress = clamp(this.life.socialProgress + socialGain);
-      this.life.mood = clamp(this.life.mood + 5 + act.bonusRep);
+      this.life.mood = clamp(this.life.mood + (relationshipDelta < 0 ? -8 : 5 + act.bonusRep));
       if (location) {
         const previous = this.life.npcRelationships[location.id] ?? 0;
-        const relationshipGain = Math.max(1, Math.round(socialGain * 0.8));
-        this.life.npcRelationships = { ...this.life.npcRelationships, [location.id]: clamp(previous + relationshipGain) };
+        const relationshipScore = clamp(previous + relationshipDelta);
+        this.life.npcRelationships = { ...this.life.npcRelationships, [location.id]: relationshipScore };
         const topic = act.selectedOptionMemory ?? 'friendly-chat';
         const memories = this.life.npcMemories[location.id] ?? [];
         this.life.npcMemories = { ...this.life.npcMemories, [location.id]: [...memories.filter((tag) => tag !== topic), topic].slice(-12) };
@@ -811,7 +874,8 @@ export class LeonidaEngine {
       saveLifeSave(this.life, this.player.cash);
       soundEngine.playPickup();
       const score = location ? this.life.npcRelationships[location.id] ?? 0 : 0;
-      this.showToast(location ? `Conversaste com ${act.npcName}. Relação ${score}/100 · Rede social +${socialGain}.` : `Conversaste com ${act.npcName}. Rede social +${socialGain}.`, 3.4);
+      const outcome = relationshipDelta < 0 ? 'Criaste tensão na conversa' : 'A relação evoluiu';
+      this.showToast(location ? `${outcome} com ${act.npcName}: ${score}/100 · Rede social +${socialGain}.` : `Conversaste com ${act.npcName}. Rede social +${socialGain}.`, 3.4);
       return;
     }
 
@@ -1315,12 +1379,64 @@ export class LeonidaEngine {
         ? 'Lembro-me de te ter dado dicas sobre esta zona.'
         : lastTopic === 'friendly-chat'
           ? 'Já tivemos oportunidade de conversar.'
-          : '';
-    const greeting = relationship >= 55
-      ? `Que bom ver-te outra vez! Já nos conhecemos bem. ${rememberedTopic}`
-      : relationship >= 20
-        ? `Olá outra vez! A nossa conversa anterior ficou-me na memória. ${rememberedTopic}`
-        : memories.length > 0 ? `Olá! Voltaste. ${rememberedTopic}` : location.description + '. Como posso ajudar?';
+          : lastTopic === 'conflict'
+            ? 'A nossa última conversa não correu pelo melhor.'
+            : lastTopic === 'reconciliation'
+              ? 'Fico contente por termos esclarecido o mal-entendido.'
+              : '';
+    const personality = location.npcPersonality ? ` Sou ${location.npcPersonality.toLowerCase()}.` : '';
+    const ambition = location.npcAmbition ? ` Neste momento, quero ${location.npcAmbition}.` : '';
+    const greeting = relationship >= 70
+      ? `Que bom ver-te outra vez! Já ganhaste a minha confiança. ${rememberedTopic}${personality}${ambition}`
+      : relationship >= 40
+        ? `Olá outra vez! Já nos conhecemos bem. ${rememberedTopic}${personality}${ambition}`
+        : memories.length > 0 ? `Olá! Voltaste. ${rememberedTopic}${personality}${ambition}` : location.description + '.' + personality + ambition + ' Como posso ajudar?';
+
+    const options = [
+      {
+        label: memories.includes('friendly-chat') ? 'Pôr a conversa em dia' : 'Cumprimentar e conversar',
+        reply: 'É sempre bom conhecer melhor quem vive e trabalha nesta zona do Porto.',
+        cashBonus: 0,
+        repBonus: 3,
+        memoryTag: 'friendly-chat',
+        relationshipDelta: 4,
+      },
+      {
+        label: memories.includes('work-opportunities') ? 'Perguntar se há novidades de trabalho' : 'Perguntar por oportunidades e atividades',
+        reply: memories.includes('work-opportunities') ? 'Continuo atento a novas oportunidades. A procura muda todos os dias; consulta o quadro de contratos.' : 'Posso indicar-te o que se passa por aqui. Consulta o quadro de contratos e participa na comunidade.',
+        cashBonus: 2,
+        repBonus: 4,
+        memoryTag: 'work-opportunities',
+        relationshipDelta: relationship >= 55 ? 6 : 3,
+      },
+      {
+        label: memories.includes('local-recommendations') ? 'Descobrir mais sítios' : 'Pedir uma recomendação local',
+        reply: 'Fica a conhecer os pequenos negócios e os serviços da zona. A cidade tem muito para descobrir.',
+        cashBonus: 0,
+        repBonus: 5,
+        memoryTag: 'local-recommendations',
+        relationshipDelta: 5,
+      },
+    ];
+    if (memories.includes('conflict') || relationship < 20) {
+      options.push({
+        label: 'Pedir desculpa e esclarecer um mal-entendido',
+        reply: 'Agradeço a tua atitude. Nem sempre concordamos, mas podemos recomeçar com respeito.',
+        cashBonus: 0,
+        repBonus: 5,
+        memoryTag: 'reconciliation',
+        relationshipDelta: 9,
+      });
+    }
+    options.push({
+      label: 'Discordar de forma brusca',
+      reply: 'Não gostei da forma como falaste comigo. A confiança constrói-se com respeito.',
+      cashBonus: 0,
+      repBonus: 0,
+      memoryTag: 'conflict',
+      relationshipDelta: -10,
+    });
+
     this.activeActivity = {
       id: `life-location-${location.id}-${Date.now()}`,
       buildingName: location.label,
@@ -1328,14 +1444,10 @@ export class LeonidaEngine {
       npcRole: location.npcRole,
       npcColor: location.npcColor,
       greeting,
-      options: [
-        { label: memories.includes('friendly-chat') ? 'Pôr a conversa em dia' : 'Cumprimentar e conversar', reply: 'É sempre bom conhecer melhor quem vive e trabalha nesta zona do Porto.', cashBonus: 0, repBonus: 3, memoryTag: 'friendly-chat' },
-        { label: memories.includes('work-opportunities') ? 'Perguntar se há novidades de trabalho' : 'Perguntar por oportunidades e atividades', reply: memories.includes('work-opportunities') ? 'Ainda estou atento a novas oportunidades. Quando souber de algo, digo-te.' : 'Posso indicar-te o que se passa por aqui. Vai conhecendo as pessoas e participa na comunidade.', cashBonus: 2, repBonus: 4, memoryTag: 'work-opportunities' },
-        { label: memories.includes('local-recommendations') ? 'Descobrir mais sítios' : 'Pedir uma recomendação local', reply: 'Fica a conhecer os pequenos negócios e os serviços da zona. A cidade tem muito para descobrir.', cashBonus: 0, repBonus: 5, memoryTag: 'local-recommendations' },
-      ],
+      options,
       miniGameKind: 'conversation',
       miniGameTitle: 'Conversa com ' + location.npcName,
-      miniGameSubtitle: 'Escolhe a tua abordagem e termina a conversa para registar a interação.',
+      miniGameSubtitle: 'As tuas escolhas alteram a confiança. Podes criar amizade, reparar um conflito ou afastar o residente.',
       phase: 'dialogue',
       selectedOptionReply: null,
       bonusCash: 0,

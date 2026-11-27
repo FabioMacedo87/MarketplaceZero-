@@ -768,6 +768,14 @@ export default function App() {
           engineRef.current?.setLifeJob(job);
           if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
         }}
+        onAcceptContract={(contractId) => {
+          engineRef.current?.acceptLifeContract(contractId);
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onCancelContract={() => {
+          engineRef.current?.cancelLifeContract();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
       />
 
       <PortoRealModal
