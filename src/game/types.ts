@@ -14,6 +14,24 @@ export type ProfessionId = 'psp' | 'taxi' | 'courier' | 'merchant' | 'paramedic'
 
 export type LifeJobId = 'barista' | 'retail' | 'courier' | 'gardener' | 'construction';
 
+export type LifeLocationKind = 'home' | 'cafe' | 'market' | 'garden' | 'depot' | 'construction';
+
+export interface LifeLocation {
+  id: string;
+  kind: LifeLocationKind;
+  label: string;
+  description: string;
+  x: number;
+  y: number;
+  radius: number;
+  markerColor: string;
+  icon: string;
+  npcName: string;
+  npcRole: string;
+  npcColor: string;
+  npcShirtColor: string;
+}
+
 export type LifeAction =
   | 'sleep'
   | 'shower'
@@ -374,6 +392,8 @@ export interface ChatMessage {
 export interface HudSnapshot {
   cash: number;
   life: LifeSimulationSnapshot;
+  nearLifeLocation: LifeLocation | null;
+  canInteractLifeLocation: boolean;
   hp: number;
   maxHp: number;
   armor: number;
