@@ -219,8 +219,13 @@ export default function App() {
       .then((data) => {
         if (Array.isArray(data?.entries)) setLeaderboard(data.entries);
       })
-      .catch(() => {});
+      .catch(() => {});7403
   }, []);
+
+  useEffect(() => {
+    const line = hud.ambientNpcDialogue;
+    if (gameState === 'PLAYING' && line) soundEngine.speakNpc(line.text, line.speaker);
+  }, [hud.ambientNpcDialogue?.text, hud.ambientNpcDialogue?.speaker, gameState]);
 
   useEffect(() => {
     const isTyping = (target: EventTarget | null) =>
