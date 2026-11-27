@@ -587,11 +587,13 @@ async function loadRealisticVehicleModel(
 
     // Vinish GLB cars use separate, named wheels so steering and rotation remain functional.
     const wheelNames = ['Wheel_FL', 'Wheel_FR', 'Wheel_RL', 'Wheel_RR'];
-    const wheels = wheelNames.map((name) => model.getObjectByName(name));
+    const wheels = wheelNames
+      .map((name) => model.getObjectByName(name))
+      .filter((wheel): wheel is THREE.Object3D => Boolean(wheel));
     rig.group.clear();
     rig.group.add(model);
 
-    if (wheels.every((wheel): wheel is THREE.Object3D => Boolean(wheel))) {
+    if (wheels.length === 4) {
       wheels.forEach((wheel) => wheel.rotation.reorder('YXZ'));
       rig.wheelRollers = wheels;
       rig.frontSteerPivots = wheels.slice(0, 2);
