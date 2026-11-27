@@ -1,11 +1,13 @@
 import React from 'react';
 import { BookOpen, Briefcase, Coffee, Droplets, Heart, Home, Moon, ShoppingBasket, ShowerHead, Users, Wallet, X } from 'lucide-react';
-import type { LifeAction, LifeJobId, LifeSimulationSnapshot } from '../game/types.ts';
+import type { LifeAction, LifeJobId, LifeLocation, LifeSimulationSnapshot } from '../game/types.ts';
+import { getRequiredWorkplace } from '../game/lifeSimulation.ts';
 
 interface LifeSimulationModalProps {
   open: boolean;
   life: LifeSimulationSnapshot;
   cash: number;
+  location: LifeLocation | null;
   onClose: () => void;
   onAction: (action: LifeAction) => void;
   onSelectJob: (job: LifeJobId) => void;
@@ -38,12 +40,26 @@ export const LifeSimulationModal: React.FC<LifeSimulationModalProps> = ({
   open,
   life,
   cash,
+  location,
   onClose,
   onAction,
   onSelectJob,
 }) => {
   if (!open) return null;
   const currentJob = JOBS.find((job) => job.id === life.job) ?? JOBS[0];
+  const atHome = location?.kind === 'home';
+  const atCafe = location?.kind === 'cafe';
+  const atMarket = location?.kind === 'market';
+  const canWorkHere = location?.kind === getRequiredWorkplace(life.job);
+  const workplaceNames = {
+    cafe: 'Café da Ribeira',
+    market: 'Mercado do Bolhão',
+    depot: 'Ponto Logístico de Gaia',
+    garden: 'Jardim da Cordoaria',
+    construction: 'Estaleiro da Boavista',
+    home: 'Apartamento do Porto',
+  } as const;
+  const requiredWorkplace = workplaceNames[getRequiredWorkplace(life.job)];
 
   return (
     <div className="fixed inset-0 z-[60] bg-slate-950/90 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
@@ -58,6 +74,9 @@ export const LifeSimulationModal: React.FC<LifeSimulationModalProps> = ({
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-300">Portugal Life · Porto</p>
             <h2 id="life-modal-title" className="mt-1 text-xl sm:text-2xl font-bold text-white">A tua vida quotidiana</h2>
             <p className="mt-1 text-xs sm:text-sm text-slate-400">Dia {life.day} · {formatClock(life.minuteOfDay)} · Rotina, trabalho e gestão pessoal</p>
+            <p className={location ? "mt-2 inline-flex rounded-full border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-200" : "mt-2 inline-flex rounded-full border border-white/15 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-400"}>
+              {location ? "Local atual: " + location.label : "Consulta de estado · sem local de atividade"}
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Fechar painel de vida" className="min-h-10 min-w-10 rounded-lg bg-white/10 text-white hover:bg-white/20 flex items-center justify-center">
             <X className="h-4 w-4" />
@@ -109,12 +128,12 @@ export const LifeSimulationModal: React.FC<LifeSimulationModalProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
           <div className="space-y-2">
             <h3 className="text-sm font-bold text-white flex items-center gap-2"><Home className="w-4 h-4 text-emerald-300" /> Casa e bem-estar</h3>
-            <ActionButton icon={<Moon className="w-4 h-4" />} title="Dormir / descansar" subtitle="Avança o tempo e recupera energia" onClick={() => onAction('sleep')} />
-            <ActionButton icon={<ShowerHead className="w-4 h-4" />} title="Tomar banho" subtitle="20 minutos · Recupera higiene" onClick={() => onAction('shower')} />
-            <ActionButton icon={<Coffee className="w-4 h-4" />} title="Cozinhar em casa" subtitle="Usa mantimentos · Recupera fome" disabled={life.groceries < 1} onClick={() => onAction('cook')} />
+            <ActionButton icon={<Moon className="w-4 h-4" />} title="Dormir / descansar" subtitle={atHome ? 'Avança o tempo e recupera energia' : 'Disponível no Apartamento do Porto'} disabled={!atHome} onClick={() => onAction('sleep')} />
+            <ActionButton icon={<ShowerHead className="w-4 h-4" />} title="Tomar banho" subtitle={atHome ? '20 minutos · Recupera higiene' : 'Disponível no Apartamento do Porto'} disabled={!atHome} onClick={() => onAction('shower')} />
+            <ActionButton icon={<Coffee className="w-4 h-4" />} title="Cozinhar em casa" subtitle={atHome ? 'Usa mantimentos · Recupera fome' : 'Disponível no Apartamento do Porto'} disabled={!atHome || life.groceries < 1} onClick={() => onAction('cook')} />
             <ActionButton icon={<Droplets className="w-4 h-4" />} title="Beber água" subtitle="Usa uma garrafa · Recupera hidratação" disabled={life.waterBottles < 1} onClick={() => onAction('drink')} />
-            <ActionButton icon={<ShoppingBasket className="w-4 h-4" />} title="Comprar mantimentos" subtitle="18 € · 4 refeições e 6 garrafas de água" onClick={() => onAction('buy_supplies')} />
-            <ActionButton icon={<Coffee className="w-4 h-4" />} title="Comer fora" subtitle="7,50 € · Refeição e bem-estar" onClick={() => onAction('eat_out')} />
+            <ActionButton icon={<ShoppingBasket className="w-4 h-4" />} title="Comprar mantimentos" subtitle={atMarket ? '18 € · 4 refeições e 6 garrafas de água' : 'Disponível no Mercado do Bolhão'} disabled={!atMarket} onClick={() => onAction('buy_supplies')} />
+            <ActionButton icon={<Coffee className="w-4 h-4" />} title="Comer fora" subtitle={atCafe ? '7,50 € · Refeição e bem-estar' : 'Disponível no Café da Ribeira'} disabled={!atCafe} onClick={() => onAction('eat_out')} />
           </div>
 
           <div className="space-y-2">
@@ -123,7 +142,7 @@ export const LifeSimulationModal: React.FC<LifeSimulationModalProps> = ({
             <select id="life-job" value={life.job} onChange={(event) => onSelectJob(event.target.value as LifeJobId)} className="w-full rounded-lg bg-slate-800 border border-white/15 px-3 py-2.5 text-sm text-white">
               {JOBS.map((job) => <option key={job.id} value={job.id}>{job.label} — {job.description}</option>)}
             </select>
-            <ActionButton icon={<Briefcase className="w-4 h-4" />} title="Fazer turno de trabalho" subtitle="4 horas · Salário depositado no banco" disabled={life.energy < 25} onClick={() => onAction('work_shift')} />
+            <ActionButton icon={<Briefcase className="w-4 h-4" />} title="Fazer turno de trabalho" subtitle={canWorkHere ? '4 horas · Salário depositado no banco' : 'Trabalho disponível em ' + requiredWorkplace} disabled={!canWorkHere || life.energy < 25} onClick={() => onAction('work_shift')} />
             <ActionButton icon={<Users className="w-4 h-4" />} title="Socializar" subtitle="30 minutos · Melhora o bem-estar" onClick={() => onAction('socialise')} />
             <ActionButton icon={<BookOpen className="w-4 h-4" />} title="Estudar / aprender" subtitle="1 hora · Desenvolve competências" disabled={life.energy < 15} onClick={() => onAction('study')} />
             <ActionButton icon={<Wallet className="w-4 h-4" />} title="Levantar 50 €" subtitle="Transferência do banco para a carteira" disabled={life.bankBalance < 50} onClick={() => onAction('withdraw_50')} />
