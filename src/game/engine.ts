@@ -1972,6 +1972,10 @@ export class LeonidaEngine {
     }
 
     // Nearby pedestrians now start short ambient conversations without a button press.
+    if (this.dialogueIndex < this.dialogueQueue.length) {
+      this.ambientNpcDialogue = null;
+      this.ambientNpcDialogueTimer = 0;
+    }
     if (this.ambientNpcDialogueTimer > 0) {
       this.ambientNpcDialogueTimer = Math.max(0, this.ambientNpcDialogueTimer - dt);
       if (this.ambientNpcDialogueTimer === 0) this.ambientNpcDialogue = null;
@@ -1982,6 +1986,7 @@ export class LeonidaEngine {
       this.ambientNpcDialogueTimer <= 0 &&
       this.ambientNpcCooldown <= 0 &&
       !this.activeActivity &&
+      this.dialogueIndex >= this.dialogueQueue.length &&
       !this.player.vehicleId
     ) {
       let nearestPedestrian: Pedestrian | null = null;
