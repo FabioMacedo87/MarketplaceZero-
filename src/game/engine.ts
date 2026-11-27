@@ -31,6 +31,8 @@ import type {
   WeaponId,
   LifeAction,
   LifeJobId,
+  LifeLocation,
+  LifeLocationKind,
   LifeSimulationSnapshot,
 } from './types.ts';
 import { WEAPONS, WEAPON_ORDER } from './weapons.ts';
@@ -45,6 +47,7 @@ import {
 import {
   BUILDINGS,
   HORIZONTAL_ROADS,
+  LIFE_LOCATIONS,
   MISSION_WAYPOINTS,
   RIVER_START_X,
   SERVICE_ZONES,
@@ -521,8 +524,8 @@ export class LeonidaEngine {
     this.showToast(`Atividade profissional selecionada: ${job}.`, 2.5);
   }
 
-  public performLifeAction(action: LifeAction) {
-    const result = performLifeAction(this.life, this.player.cash, action);
+  public performLifeAction(action: LifeAction, locationKind: LifeLocationKind | null = null) {
+    const result = performLifeAction(this.life, this.player.cash, action, locationKind);
     if (!result.ok) {
       this.showToast(result.message, 3.2);
       return result;
@@ -1180,6 +1183,19 @@ export class LeonidaEngine {
       }
     }
     return best;
+  }
+
+  private findNearestLifeLocation(maxDistance = 150): LifeLocation | null {
+    let nearest: LifeLocation | null = null;
+    let nearestDistance = maxDistance;
+    for (const location of LIFE_LOCATIONS) {
+      const distance = dist(this.player.x, this.player.y, location.x, location.y);
+      if (distance <= location.radius && distance < nearestDistance) {
+        nearest = location;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
   }
 
   public focusBuildingWaypoint(buildingId: string) {
@@ -1895,6 +1911,7 @@ export class LeonidaEngine {
     const nearVeh = !veh ? this.findNearestVehicle(84) : null;
     const nearZone = this.findNearestServiceZone();
     const nearBuilding = this.findNearestBuilding();
+    const nearLifeLocation = this.findNearestLifeLocation();
     const profDef = PROFESSIONS[this.player.profession];
 
     let timeOfDayLabel = 'Entardecer no Douro';
@@ -1944,6 +1961,8 @@ export class LeonidaEngine {
       nearServiceZone: nearZone ? nearZone.label : null,
       nearBuildingId: nearBuilding ? nearBuilding.id : null,
       nearBuildingName: nearBuilding ? nearBuilding.label : null,
+      nearLifeLocation,
+      canInteractLifeLocation: Boolean(nearLifeLocation),
       missionTitle: this.mission.title,
       missionObjective: canInteractMission
         ? `Premir [G] para falar com ${this.mission.npcName}`
