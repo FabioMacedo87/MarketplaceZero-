@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
   createBuildingFacadeTextures,
   createLandmarkSignTexture,
@@ -9,9 +10,13 @@ import type { Building, CharacterId, Pickup, VehicleType, WeaponId } from './typ
 
 export const WORLD_SCALE = 0.1;
 
+export type VehicleColorMaterial = THREE.Material & { color: THREE.Color };
+
 export interface VehicleRig {
   group: THREE.Group;
-  paintMat: THREE.MeshPhysicalMaterial;
+  paintMat: VehicleColorMaterial;
+  paintMaterials?: VehicleColorMaterial[];
+  wheelAxis?: 'x' | 'z';
   taillightMat: THREE.MeshStandardMaterial;
   headlightMat: THREE.MeshStandardMaterial;
   wheelRollers: THREE.Object3D[];
@@ -504,7 +509,7 @@ export function createVehicleRig(
     group.add(sign);
   }
 
-  return {
+  const rig: VehicleRig = {
     group,
     paintMat,
     taillightMat,
@@ -515,7 +520,127 @@ export function createVehicleRig(
     sirenBlue,
     sirenLight,
     headlightBeam,
+    wheelAxis: 'z',
   };
+
+  void loadRealisticVehicleModel(rig, type, colorHex);
+  return rig;
+}
+
+const VEHICLE_ASSET_FILES: Record<VehicleType, string> = {
+  coupe: 'rear-engine-sports-coupe.glb',
+  muscle: 'muscle-coupe.glb',
+  buggy: 'boxy-off-roader.glb',
+  police: 'sport-sedan.glb',
+  taxi: 'retro-city-car.glb',
+};
+
+const vehicleAssetLoader = new GLTFLoader();
+const vehicleAssetCache = new Map<string, Promise<THREE.Group>>();
+
+function getVehicleAssetTemplate(fileName: string): Promise<THREE.Group> {
+  const cached = vehicleAssetCache.get(fileName);
+  if (cached) return cached;
+
+  const promise = vehicleAssetLoader
+    .loadAsync(`/models/cars/${fileName}`)
+    .then((gltf) => gltf.scene);
+  vehicleAssetCache.set(fileName, promise);
+  return promise;
+}
+
+async function loadRealisticVehicleModel(
+  rig: VehicleRig,
+  type: VehicleType,
+  colorHex: string,
+) {
+  const fileName = VEHICLE_ASSET_FILES[type];
+  try {
+    const template = await getVehicleAssetTemplate(fileName);
+    if (!rig.group.parent) return;
+
+    const model = template.clone(true);
+    model.rotation.y = Math.PI / 2;
+    const paintMaterials: VehicleColorMaterial[] = [];
+
+    model.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = true;
+
+      const cloneMaterial = (source: THREE.Material): THREE.Material => {
+        const material = source.clone();
+        if (material.name.toLowerCase().startsWith('paint') && 'color' in material) {
+          const colorMaterial = material as VehicleColorMaterial;
+          colorMaterial.color.set(colorHex);
+          paintMaterials.push(colorMaterial);
+        }
+        return material;
+      };
+
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map(cloneMaterial)
+        : cloneMaterial(mesh.material);
+    });
+
+    // Vinish GLB cars use separate, named wheels so steering and rotation remain functional.
+    const wheelNames = ['Wheel_FL', 'Wheel_FR', 'Wheel_RL', 'Wheel_RR'];
+    const wheels = wheelNames.map((name) => model.getObjectByName(name));
+    rig.group.clear();
+    rig.group.add(model);
+
+    if (wheels.every((wheel): wheel is THREE.Object3D => Boolean(wheel))) {
+      wheels.forEach((wheel) => wheel.rotation.reorder('YXZ'));
+      rig.wheelRollers = wheels;
+      rig.frontSteerPivots = wheels.slice(0, 2);
+      rig.wheelAxis = 'x';
+    }
+
+    if (paintMaterials.length > 0) {
+      rig.paintMaterials = paintMaterials;
+      rig.paintMat = paintMaterials[0];
+    }
+
+    rig.headlightBeam = undefined;
+
+    if (type === 'police' && rig.sirenRed && rig.sirenBlue) {
+      const lightBarBase = new THREE.Mesh(
+        new THREE.BoxGeometry(1.05, 0.09, 0.25),
+        new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.52, metalness: 0.35 }),
+      );
+      lightBarBase.position.set(0, 1.55, 0);
+      const redPod = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.13, 0.23), rig.sirenRed);
+      redPod.position.set(-0.28, 1.66, 0);
+      const bluePod = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.13, 0.23), rig.sirenBlue);
+      bluePod.position.set(0.28, 1.66, 0);
+      model.add(lightBarBase, redPod, bluePod);
+      if (rig.sirenLight) {
+        rig.sirenLight.position.set(0, 2.0, 0);
+        model.add(rig.sirenLight);
+      }
+    }
+
+    if (type === 'taxi') {
+      const taxiSignMaterial = new THREE.MeshStandardMaterial({
+        color: 0x6ee7b7,
+        emissive: 0x10b981,
+        emissiveIntensity: 0.8,
+        roughness: 0.25,
+      });
+      const taxiSign = new THREE.Mesh(
+        new THREE.BoxGeometry(0.58, 0.16, 0.28),
+        taxiSignMaterial,
+      );
+      taxiSign.position.set(0, 1.62, 0);
+      model.add(taxiSign);
+    }
+
+    console.info('[PORTUGAL LIFE] Veículo realista carregado:', fileName);
+  } catch (error) {
+    console.warn(`[PORTUGAL LIFE] Não foi possível carregar ${fileName}; a usar o veículo de reserva.`, error);
+  }
 }
 
 export function createCharacterRig(
