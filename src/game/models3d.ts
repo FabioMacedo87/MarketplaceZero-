@@ -1276,7 +1276,186 @@ export function createBuildingRig(
     group.add(cup);
   }
 
-  // Azulejo Portuguese monument plaque on entrance facade
+  // Detailed street facades: recessed glazing, stone frames, wrought-iron balconies and cornices.
+  const windowGlassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x263746,
+    roughness: 0.2,
+    metalness: 0.18,
+    clearcoat: 0.55,
+    clearcoatRoughness: 0.16,
+  });
+  const windowFrameMat = new THREE.MeshStandardMaterial({
+    color: b.facadeStyle === 'ochre' ? 0xcbb89d : 0xb9b2a5,
+    roughness: 0.78,
+    metalness: 0.04,
+  });
+  const balconyMetalMat = new THREE.MeshStandardMaterial({
+    color: 0x20262b,
+    roughness: 0.48,
+    metalness: 0.72,
+  });
+  const balconyStoneMat = new THREE.MeshStandardMaterial({
+    color: 0x8c877f,
+    roughness: 0.9,
+    metalness: 0.02,
+  });
+
+  const paneWidth = 0.96;
+  const paneHeight = 1.38;
+  const paneGeometry = new THREE.BoxGeometry(paneWidth, paneHeight, 0.1);
+  const frameHorizontalGeometry = new THREE.BoxGeometry(paneWidth + 0.2, 0.09, 0.18);
+  const frameVerticalGeometry = new THREE.BoxGeometry(0.09, paneHeight + 0.16, 0.18);
+  const sillGeometry = new THREE.BoxGeometry(paneWidth + 0.28, 0.13, 0.34);
+  const balconySlabGeometry = new THREE.BoxGeometry(paneWidth + 0.52, 0.12, 0.72);
+  const balconyRailGeometry = new THREE.BoxGeometry(paneWidth + 0.52, 0.07, 0.07);
+  const balconyPostGeometry = new THREE.BoxGeometry(0.07, 0.58, 0.07);
+
+  const paneInstances: THREE.Object3D[] = [];
+  const horizontalFrameInstances: THREE.Object3D[] = [];
+  const verticalFrameInstances: THREE.Object3D[] = [];
+  const sillInstances: THREE.Object3D[] = [];
+  const balconySlabInstances: THREE.Object3D[] = [];
+  const balconyRailInstances: THREE.Object3D[] = [];
+  const balconyPostInstances: THREE.Object3D[] = [];
+
+  const addInstancePose = (
+    target: THREE.Object3D[],
+    x: number,
+    y: number,
+    z: number,
+    rotationY: number,
+  ) => {
+    const pose = new THREE.Object3D();
+    pose.position.set(x, y, z);
+    pose.rotation.y = rotationY;
+    pose.updateMatrix();
+    target.push(pose);
+  };
+
+  const windowRows = Math.min(5, Math.max(2, b.floors - 1));
+  const addWindowFace = (
+    axis: 'x' | 'z',
+    sign: number,
+    faceLength: number,
+    faceDepth: number,
+    isFront: boolean,
+  ) => {
+    const columns = Math.max(2, Math.min(7, Math.floor(faceLength / 5.2)));
+    const spacing = faceLength / (columns + 1);
+    const rotationY = axis === 'x' ? Math.PI / 2 : 0;
+    const surfaceOffset = faceDepth * 0.5 + 0.12;
+
+    for (let row = 0; row < windowRows; row += 1) {
+      const windowY = 2.35 + row * 2.7;
+      if (windowY + paneHeight * 0.5 > Math.min(18.5, b.floors * 2.8)) continue;
+
+      for (let column = 0; column < columns; column += 1) {
+        const along = -faceLength * 0.5 + spacing * (column + 1);
+        const x = axis === 'z' ? along : sign * surfaceOffset;
+        const z = axis === 'z' ? sign * surfaceOffset : along;
+
+        addInstancePose(paneInstances, x, windowY, z, rotationY);
+        addInstancePose(horizontalFrameInstances, x, windowY - paneHeight * 0.5, z, rotationY);
+        addInstancePose(horizontalFrameInstances, x, windowY + paneHeight * 0.5, z, rotationY);
+        addInstancePose(verticalFrameInstances, x - Math.cos(rotationY) * (paneWidth * 0.5), windowY, z + Math.sin(rotationY) * (paneWidth * 0.5), rotationY);
+        addInstancePose(verticalFrameInstances, x + Math.cos(rotationY) * (paneWidth * 0.5), windowY, z - Math.sin(rotationY) * (paneWidth * 0.5), rotationY);
+        addInstancePose(sillInstances, x, windowY - paneHeight * 0.5 - 0.12, z, rotationY);
+
+        // A small number of windows become proper Juliet balconies on the public-facing facade.
+        if (isFront && row > 0 && column % 2 === 0 && b.facadeStyle !== 'white_concrete') {
+          const outward = sign * 0.34;
+          const balconyX = axis === 'z' ? x : x + outward;
+          const balconyZ = axis === 'z' ? z + outward : z;
+          const railX = axis === 'z' ? x : x + sign * 0.72;
+          const railZ = axis === 'z' ? z + sign * 0.72 : z;
+          addInstancePose(balconySlabInstances, balconyX, windowY - 0.82, balconyZ, rotationY);
+          addInstancePose(balconyRailInstances, railX, windowY - 0.48, railZ, rotationY);
+
+          const postOffset = (paneWidth + 0.44) * 0.5;
+          const post1X = axis === 'z' ? x - postOffset : x + sign * 0.72;
+          const post1Z = axis === 'z' ? z + sign * 0.72 : z - postOffset;
+          const post2X = axis === 'z' ? x + postOffset : x + sign * 0.72;
+          const post2Z = axis === 'z' ? z + sign * 0.72 : z + postOffset;
+          addInstancePose(balconyPostInstances, post1X, windowY - 0.77, post1Z, rotationY);
+          addInstancePose(balconyPostInstances, post2X, windowY - 0.77, post2Z, rotationY);
+        }
+      }
+    }
+  };
+
+  const frontAxis: 'x' | 'z' = Math.abs(dxEnt) > Math.abs(dzEnt) ? 'x' : 'z';
+  const frontSign = frontAxis === 'x' ? (dxEnt > 0 ? 1 : -1) : (dzEnt > 0 ? 1 : -1);
+  addWindowFace('z', -1, w * 0.9, d, frontAxis === 'z' && frontSign === -1);
+  addWindowFace('z', 1, w * 0.9, d, frontAxis === 'z' && frontSign === 1);
+  addWindowFace('x', -1, d * 0.84, w, frontAxis === 'x' && frontSign === -1);
+  addWindowFace('x', 1, d * 0.84, w, frontAxis === 'x' && frontSign === 1);
+
+  const addInstancedDetails = (
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    poses: THREE.Object3D[],
+  ) => {
+    if (poses.length === 0) return;
+    const instances = new THREE.InstancedMesh(geometry, material, poses.length);
+    poses.forEach((pose, index) => instances.setMatrixAt(index, pose.matrix));
+    instances.instanceMatrix.needsUpdate = true;
+    instances.computeBoundingSphere();
+    instances.castShadow = enableShadows;
+    instances.receiveShadow = enableShadows;
+    group.add(instances);
+  };
+
+  addInstancedDetails(paneGeometry, windowGlassMat, paneInstances);
+  addInstancedDetails(frameHorizontalGeometry, windowFrameMat, horizontalFrameInstances);
+  addInstancedDetails(frameVerticalGeometry, windowFrameMat, verticalFrameInstances);
+  addInstancedDetails(sillGeometry, windowFrameMat, sillInstances);
+  addInstancedDetails(balconySlabGeometry, balconyStoneMat, balconySlabInstances);
+  addInstancedDetails(balconyRailGeometry, balconyMetalMat, balconyRailInstances);
+  addInstancedDetails(balconyPostGeometry, balconyMetalMat, balconyPostInstances);
+
+  // Continuous stone cornice breaks up the single-box silhouette and casts a fine shadow.
+  const corniceY = Math.min(19.2, b.floors * 2.8) + 0.28;
+  const corniceMaterial = SHARED_WHITE_STONE_MAT;
+  const corniceFront = new THREE.Mesh(new THREE.BoxGeometry(w + 0.9, 0.28, 0.32), corniceMaterial);
+  corniceFront.position.set(0, corniceY, d * 0.5 + 0.02);
+  const corniceBack = corniceFront.clone();
+  corniceBack.position.z = -d * 0.5 - 0.02;
+  const corniceSide = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.28, d + 0.9), corniceMaterial);
+  corniceSide.position.set(w * 0.5 + 0.02, corniceY, 0);
+  const corniceOtherSide = corniceSide.clone();
+  corniceOtherSide.position.x = -w * 0.5 - 0.02;
+  group.add(corniceFront, corniceBack, corniceSide, corniceOtherSide);
+  corniceFront.castShadow = corniceBack.castShadow = corniceSide.castShadow = corniceOtherSide.castShadow = enableShadows;
+
+  // Terracotta chimney stacks and small roof service housings add believable roof silhouettes.
+  if (b.facadeStyle !== 'white_concrete' && kind !== 'clerigos' && kind !== 'serra_pilar') {
+    const chimneyGeometry = new THREE.BoxGeometry(0.72, 1.5, 0.72);
+    const chimneyCapGeometry = new THREE.BoxGeometry(0.92, 0.16, 0.92);
+    const chimneyMat = new THREE.MeshStandardMaterial({
+      color: 0x9a4930,
+      roughness: 0.88,
+      metalness: 0.02,
+    });
+    for (let chimney = 0; chimney < 2; chimney += 1) {
+      const x = chimney === 0 ? -w * 0.28 : w * 0.3;
+      const base = corniceY + 0.25;
+      const stack = new THREE.Mesh(chimneyGeometry, chimneyMat);
+      stack.position.set(x, base + 0.75, -d * 0.16);
+      const cap = new THREE.Mesh(chimneyCapGeometry, chimneyMat);
+      cap.position.set(x, base + 1.55, -d * 0.16);
+      stack.castShadow = cap.castShadow = enableShadows;
+      group.add(stack, cap);
+    }
+    const roofHatch = new THREE.Mesh(
+      new THREE.BoxGeometry(Math.max(1.2, w * 0.16), 0.82, Math.max(1.0, d * 0.14)),
+      SHARED_SLATE_MAT,
+    );
+    roofHatch.position.set(w * 0.12, corniceY + 0.42, d * 0.18);
+    roofHatch.castShadow = enableShadows;
+    group.add(roofHatch);
+  }
+
+    // Azulejo Portuguese monument plaque on entrance facade
   addAzulejoPlaque(group, b.label, b.district, plaqueX, 6.8, plaqueZ, plaqueRot);
 
   return { group, facadeMat, windowGlowMats };
