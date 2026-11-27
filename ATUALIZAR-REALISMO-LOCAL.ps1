@@ -56,7 +56,7 @@ if ($remaining.Count -gt 0) {
 Write-Host "Portas 3000 e 24678 livres." -ForegroundColor Green
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$sourceCommit = "133e8be55e3636dea1ea3fa4b4db1e5d6b909465"
+$sourceCommit = "3a5429d1b10f6fff89db4dc266a0838be17eb8d4"
 $baseUrl = "https://raw.githubusercontent.com/FabioMacedo87/MarketplaceZero-/$sourceCommit"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $stageRoot = Join-Path $env:TEMP "PORTUGAL-LIFE-REALISMO-$stamp"
