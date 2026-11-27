@@ -5,6 +5,7 @@ import {
   Camera,
   Compass,
   Hand,
+  Home,
   MessageSquare,
   Pause,
   PhoneCall,
@@ -30,6 +31,7 @@ interface GameHudProps {
   onToggleMute: () => void;
   onCycleCamera: () => void;
   onOpenCareer: () => void;
+  onOpenLife: () => void;
   onOpenGarage: () => void;
   onOpenStory: () => void;
   onOpenRealExplorer: (buildingId?: string | null) => void;
@@ -54,6 +56,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   onToggleMute,
   onCycleCamera,
   onOpenCareer,
+  onOpenLife,
   onOpenGarage,
   onOpenStory,
   onOpenRealExplorer,
@@ -93,7 +96,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 €{hud.cash.toLocaleString('pt-PT')}
               </p>
               <p className="text-[11px] text-slate-400 mt-0.5 tabular-nums truncate">
-                Carta {hud.drivingPoints}/12 · {hud.reputation} Rep
+                Dia {hud.life.day} · {String(Math.floor(hud.life.minuteOfDay / 60)).padStart(2, '0')}:{String(Math.floor(hud.life.minuteOfDay % 60)).padStart(2, '0')} · Carta {hud.drivingPoints}/12
               </p>
             </div>
 
@@ -155,7 +158,17 @@ export const GameHud: React.FC<GameHudProps> = ({
 
             <button
               type="button"
-              onClick={onCall112}
+              onClick={onOpenLife}
+              aria-label="Abrir a simulação de vida quotidiana"
+              className="min-h-[40px] px-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 text-emerald-100 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Home className="w-3.5 h-3.5 shrink-0 text-emerald-300" aria-hidden="true" />
+              <span>Vida</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onCall112
               aria-label="Ligar 112 para PSP e INEM"
               className="min-h-[40px] min-w-[40px] px-2 rounded-lg bg-rose-500/20 border border-rose-400/50 hover:bg-rose-500/30 text-rose-200 text-xs font-bold flex items-center justify-center gap-1 transition-colors cursor-pointer"
             >
