@@ -2019,7 +2019,9 @@ export class LeonidaEngine {
 
         // Rare, short cultural Easter egg from the Portuguese web-video saga.
         if (!this.ambientNpcEasterEggUsed && Math.random() < 0.035) {
-          text = 'EU QUERO O MEU SECADOR!';
+          text = Math.random() < 0.5
+            ? 'EU QUERO O MEU SECADOR!'
+            : 'Quem é viva sempre aparece!';
           this.ambientNpcEasterEggUsed = true;
         }
 
