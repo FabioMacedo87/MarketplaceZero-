@@ -56,7 +56,7 @@ if ($remaining.Count -gt 0) {
 Write-Host "Portas 3000 e 24678 livres." -ForegroundColor Green
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$sourceCommit = "f387469444044819781092d7288e62a4c6973477"
+$sourceCommit = "133e8be55e3636dea1ea3fa4b4db1e5d6b909465"
 $baseUrl = "https://raw.githubusercontent.com/FabioMacedo87/MarketplaceZero-/$sourceCommit"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $stageRoot = Join-Path $env:TEMP "PORTUGAL-LIFE-REALISMO-$stamp"
@@ -66,7 +66,12 @@ New-Item -ItemType Directory -Force -Path $stageRoot, $backupRoot | Out-Null
 
 $files = @(
     @{ Local="src\game\scene3d.ts"; Remote="src/game/scene3d.ts"; Min=20000 },
+    @{ Local="src\game\models3d.ts"; Remote="src/game/models3d.ts"; Min=30000 },
     @{ Local="src\game\textures.ts"; Remote="src/game/textures.ts"; Min=10000 },
+    @{ Local="src\game\engine.ts"; Remote="src/game/engine.ts"; Min=30000 },
+    @{ Local="src\game\types.ts"; Remote="src/game/types.ts"; Min=5000 },
+    @{ Local="src\game\professions.ts"; Remote="src/game/professions.ts"; Min=15000 },
+    @{ Local="src\components\GameHud.tsx"; Remote="src/components/GameHud.tsx"; Min=10000 },
     @{ Local="tsconfig.json"; Remote="tsconfig.json"; Min=100 },
     @{ Local=".gitignore"; Remote=".gitignore"; Min=20 },
     @{ Local="INSTALAR-MODELOS-REALISTAS.ps1"; Remote="INSTALAR-MODELOS-REALISTAS.ps1"; Min=3000 },
@@ -98,14 +103,34 @@ foreach ($file in $files) {
 }
 
 $scene = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\scene3d.ts"))
+$models = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\models3d.ts"))
 $textures = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\textures.ts"))
+$engine = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\engine.ts"))
+$types = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\types.ts"))
+$professions = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\game\professions.ts"))
+$hud = [System.IO.File]::ReadAllText((Join-Path $stageRoot "src\components\GameHud.tsx"))
 $tsconfig = [System.IO.File]::ReadAllText((Join-Path $stageRoot "tsconfig.json"))
 
 if (!$scene.Contains("lucia-locomotion.glb") -or !$scene.Contains("AnimationMixer")) {
     throw "A versão descarregada não passou a validação dos modelos humanos."
 }
+if (!$models.Contains("rear-engine-sports-coupe.glb") -or !$models.Contains("loadRealisticVehicleModel")) {
+    throw "A versão descarregada não passou a validação dos veículos."
+}
+if (!$models.Contains("Detailed street facades") -or !$models.Contains("wrought-iron balconies") -or !$models.Contains("Terracotta chimney stacks")) {
+    throw "A versão descarregada não passou a validação dos novos edifícios."
+}
 if (!$textures.Contains("Procedural PBR asphalt") -or !$scene.Contains("Raised junction surfaces and four-sided zebra crossings") -or !$scene.Contains("const sidewalkWidth = 2.35")) {
     throw "A versão descarregada não passou a validação das ruas e dos mapas realistas."
+}
+if (!$professions.Contains("PROFESSION_MISSIONS.taxi.push") -or !$professions.Contains("PROFESSION_MISSIONS.psp.push")) {
+    throw "A versão descarregada não contém a nova rotação de missões."
+}
+if (!$engine.Contains("EU QUERO O MEU SECADOR!") -or !$engine.Contains("const templateIndex = (Math.max(1, index) - 1) % templates.length")) {
+    throw "A versão descarregada não passou a validação das conversas e da rotação de missões."
+}
+if (!$types.Contains("export interface AmbientNpcDialogue") -or !$hud.Contains("hud.ambientNpcDialogue")) {
+    throw "A versão descarregada não passou a validação das falas dos NPCs."
 }
 if (!$tsconfig.Contains("BACKUP-*")) {
     throw "A configuração TypeScript não exclui as pastas de backup."
