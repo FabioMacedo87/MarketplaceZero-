@@ -152,9 +152,9 @@ export const GameModals: React.FC<GameModalsProps> = ({
                   PORTUGAL LIFE
                 </h1>
                 <p className="mt-2.5 text-sm sm:text-base text-slate-200 max-w-[58ch] leading-relaxed">
-                  Escolha a sua profissão real no Porto — Motorista TVDE, Estafeta, Empresário,
-                  Paramédico INEM ou Agente da PSP — e viva a cidade com diálogos, minijogos e
-                  patrulhas entre jogadores sem limite de tempo.
+                  Vive o Porto à tua maneira. Trabalha, constrói relações, gere o teu dinheiro,
+                  explora os bairros, conduz e desenvolve o teu próprio percurso. As histórias e
+                  os desafios são opcionais.
                 </p>
               </div>
 
