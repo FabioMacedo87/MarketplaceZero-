@@ -126,8 +126,8 @@ if (!$textures.Contains("Procedural PBR asphalt") -or !$scene.Contains("Raised j
 if (!$professions.Contains("PROFESSION_MISSIONS.taxi.push") -or !$professions.Contains("PROFESSION_MISSIONS.psp.push")) {
     throw "A versão descarregada não contém a nova rotação de missões."
 }
-if (!$engine.Contains("EU QUERO O MEU SECADOR!") -or !$engine.Contains("Quem é viva sempre aparece!") -or !$engine.Contains("const templateIndex = (Math.max(1, index) - 1) % templates.length")) {
-    throw "A versão descarregada não passou a validação das conversas e da rotação de missões."
+if (!$engine.Contains("ambientNpcDialogue") -or !$engine.Contains("ambientNpcEasterEggUsed") -or !$engine.Contains("templateIndex") -or !$engine.Contains("EU QUERO O MEU SECADOR!")) {
+    throw "A validação dos sistemas de conversa e de rotação de missões falhou."
 }
 if (!$types.Contains("export interface AmbientNpcDialogue") -or !$hud.Contains("hud.ambientNpcDialogue")) {
     throw "A versão descarregada não passou a validação das falas dos NPCs."
