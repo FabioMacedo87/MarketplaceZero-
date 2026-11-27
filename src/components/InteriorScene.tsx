@@ -430,6 +430,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({
       buildRoom(scene);
 
       const updatePrompt = (id: string | null) => {
+        if (nearTaskRef.current === id) return;
         nearTaskRef.current = id;
         setNearTaskId(id);
       };
