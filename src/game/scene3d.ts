@@ -1092,7 +1092,16 @@ export class LeonidaScene3D {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = 'rgba(8, 13, 24, 0.88)';
         ctx.beginPath();
-        ctx.roundRect(8, 8, 496, 112, 22);
+        ctx.moveTo(30, 8);
+        ctx.lineTo(482, 8);
+        ctx.arcTo(504, 8, 504, 30, 22);
+        ctx.lineTo(504, 98);
+        ctx.arcTo(504, 120, 482, 120, 22);
+        ctx.lineTo(30, 120);
+        ctx.arcTo(8, 120, 8, 98, 22);
+        ctx.lineTo(8, 30);
+        ctx.arcTo(8, 8, 30, 8, 22);
+        ctx.closePath();
         ctx.fill();
         ctx.strokeStyle = location.markerColor;
         ctx.lineWidth = 5;
@@ -1101,7 +1110,7 @@ export class LeonidaScene3D {
         ctx.font = '600 42px Arial, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(location.label.toUpperCase(), 256, 66, 462);
+        ctx.fillText(`${location.icon}  ${location.label.toUpperCase()}`, 256, 66, 462);
       }
       const labelTexture = new THREE.CanvasTexture(canvas);
       labelTexture.colorSpace = THREE.SRGBColorSpace;
