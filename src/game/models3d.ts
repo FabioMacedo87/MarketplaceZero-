@@ -481,7 +481,7 @@ export function createVehicleRig(
     sirenBlue = new THREE.MeshStandardMaterial({
       color: 0x3b82f6,
       emissive: 0x3b82f6,
-      emissiveIntensity: 2.0,
+      emissiveIntensity: 1.15,
     });
 
     const redPod = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.12, 0.52), sirenRed);
@@ -1023,7 +1023,7 @@ export function createBuildingRig(
     const crimsonMat = new THREE.MeshStandardMaterial({
       color: 0xe11d48,
       emissive: 0xfb7185,
-      emissiveIntensity: 1.4,
+      emissiveIntensity: 0.7,
     });
     windowGlowMats.push(crimsonMat);
     makeBox(8.5, 6.2, 1.4, crimsonMat, 0, 3.4, -d * 0.44);
@@ -1127,7 +1127,7 @@ export function createBuildingRig(
     const neonMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(b.accentColor),
       emissive: new THREE.Color(b.accentColor),
-      emissiveIntensity: 1.5,
+      emissiveIntensity: 0.75,
     });
     windowGlowMats.push(neonMat);
     makeBox(1.2, 1.8, d * 0.56, neonMat, -w * 0.46, 8.2, 0);
@@ -1223,7 +1223,7 @@ export function createDomLuisBridgeMesh(spanMeters: number, enableShadows: boole
   const lampMat = new THREE.MeshStandardMaterial({
     color: 0xfef3c7,
     emissive: 0xfbbf24,
-    emissiveIntensity: 1.8,
+    emissiveIntensity: 0.9,
   });
   for (let lx = -halfSpan + 6; lx <= halfSpan - 6; lx += 8) {
     for (const lz of [-6.2, 6.2]) {
