@@ -1,4 +1,4 @@
-import type { LifeAction, LifeJobId, LifeSimulationSnapshot } from './types.ts';
+import type { LifeAction, LifeJobId, LifeLocationKind, LifeSimulationSnapshot } from './types.ts';
 
 const STORAGE_KEY = 'portugal-life-save-v1';
 const JOB_PAY: Record<LifeJobId, number> = {
@@ -38,6 +38,26 @@ function safeNumber(value: unknown, fallback: number, min: number, max: number):
 }
 
 const VALID_JOBS: LifeJobId[] = ['barista', 'retail', 'courier', 'gardener', 'construction'];
+
+const JOB_WORKPLACE: Record<LifeJobId, LifeLocationKind> = {
+  barista: 'cafe',
+  retail: 'market',
+  courier: 'depot',
+  gardener: 'garden',
+  construction: 'construction',
+};
+
+const ACTION_WORKPLACE: Partial<Record<LifeAction, LifeLocationKind>> = {
+  sleep: 'home',
+  shower: 'home',
+  cook: 'home',
+  buy_supplies: 'market',
+  eat_out: 'cafe',
+};
+
+export function getRequiredWorkplace(job: LifeJobId): LifeLocationKind {
+  return JOB_WORKPLACE[job];
+}
 
 export function advanceLifeSimulation(
   current: LifeSimulationSnapshot,
@@ -98,6 +118,7 @@ export function performLifeAction(
   current: LifeSimulationSnapshot,
   currentCash: number,
   action: LifeAction,
+  locationKind: LifeLocationKind | null = null,
 ): LifeActionResult {
   let life = { ...current };
   let cash = currentCash;
@@ -107,6 +128,31 @@ export function performLifeAction(
     life: current,
     cash: currentCash,
   });
+
+  const requiredLocation = ACTION_WORKPLACE[action];
+  if (requiredLocation && locationKind !== requiredLocation) {
+    const names: Record<LifeLocationKind, string> = {
+      home: 'Apartamento do Porto',
+      cafe: 'Café da Ribeira',
+      market: 'Mercado do Bolhão',
+      garden: 'Jardim da Cordoaria',
+      depot: 'Ponto Logístico de Gaia',
+      construction: 'Estaleiro da Boavista',
+    };
+    return fail(`Esta atividade exige que estejas em ${names[requiredLocation]}.`);
+  }
+
+  if (action === 'work_shift' && locationKind !== JOB_WORKPLACE[life.job]) {
+    const names: Record<LifeLocationKind, string> = {
+      home: 'Apartamento do Porto',
+      cafe: 'Café da Ribeira',
+      market: 'Mercado do Bolhão',
+      garden: 'Jardim da Cordoaria',
+      depot: 'Ponto Logístico de Gaia',
+      construction: 'Estaleiro da Boavista',
+    };
+    return fail(`Para trabalhar como ${life.job}, desloca-te a ${names[JOB_WORKPLACE[life.job]]}.`);
+  }
 
   switch (action) {
     case 'sleep': {
