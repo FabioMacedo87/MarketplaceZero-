@@ -176,7 +176,7 @@ export class LeonidaScene3D {
     );
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = 0.94;
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     if (!this.isSoftwareGl) {
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -191,7 +191,7 @@ export class LeonidaScene3D {
     this.renderer.domElement.addEventListener('webglcontextrestored', this.handleContextRestored);
 
     this.scene = new THREE.Scene();
-    this.fog = new THREE.FogExp2(0xe2b695, 0.0021);
+    this.fog = new THREE.FogExp2(0xb9c7d4, 0.00175);
     this.scene.fog = this.fog;
 
     const aspect =
@@ -204,24 +204,24 @@ export class LeonidaScene3D {
     const roomEnv = new RoomEnvironment();
     const envTex = pmrem.fromScene(roomEnv, 0.04).texture;
     this.scene.environment = envTex;
-    this.scene.environmentIntensity = 0.72;
+    this.scene.environmentIntensity = 0.58;
     roomEnv.dispose();
     pmrem.dispose();
     this.disposables.push(envTex);
 
     this.skyUniforms = {
-      uTopColor: { value: new THREE.Color('#275596') },
-      uHorizonColor: { value: new THREE.Color('#f7b585') },
-      uSunColor: { value: new THREE.Color('#ffe09e') },
+      uTopColor: { value: new THREE.Color('#38689a') },
+      uHorizonColor: { value: new THREE.Color('#d9c8b8') },
+      uSunColor: { value: new THREE.Color('#fff0d6') },
       uSunDir: { value: new THREE.Vector3(-0.7, 0.3, -0.5).normalize() },
       uTime: { value: 0 },
     };
     this.buildSkyDome();
 
-    this.hemiLight = new THREE.HemisphereLight(0xcfe4ff, 0x2b2824, 0.9);
+    this.hemiLight = new THREE.HemisphereLight(0xd8e6f4, 0x34302b, 0.72);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight(0xffdfb0, 2.35);
+    this.sunLight = new THREE.DirectionalLight(0xffecd4, 1.78);
     this.sunLight.position.set(-80, 52, -60);
     this.sunLight.castShadow = !this.isSoftwareGl;
     if (!this.isSoftwareGl) {
@@ -308,10 +308,10 @@ export class LeonidaScene3D {
       this.composer.setSize(w, h);
 
       const renderPass = new RenderPass(this.scene, this.camera);
-      const bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.24, 0.42, 0.9);
+      const bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.075, 0.28, 0.94);
       const vignettePass = new ShaderPass(VignetteShader);
       vignettePass.uniforms['offset'].value = 0.88;
-      vignettePass.uniforms['darkness'].value = 0.92;
+      vignettePass.uniforms['darkness'].value = 0.24;
       const outputPass = new OutputPass();
       const fxaaPass = new FXAAPass();
 
@@ -395,12 +395,12 @@ export class LeonidaScene3D {
             float n = fbm(cloudUv);
             float cloudMask = smoothstep(0.52, 0.8, n) * smoothstep(0.04, 0.28, dir.y);
             vec3 cloudCol = mix(uHorizonColor * 1.15 + vec3(0.18), uSunColor * 1.1, 0.42);
-            col = mix(col, cloudCol, cloudMask * 0.45);
+            col = mix(col, cloudCol, cloudMask * 0.28);
           }
 
           float sunAmt = max(dot(dir, normalize(uSunDir)), 0.0);
-          col += uSunColor * pow(sunAmt, 44.0) * 1.05;
-          col += uSunColor * pow(sunAmt, 7.0) * 0.28;
+          col += uSunColor * pow(sunAmt, 44.0) * 0.58;
+          col += uSunColor * pow(sunAmt, 7.0) * 0.13;
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -678,18 +678,29 @@ export class LeonidaScene3D {
     const planeTrees = CITY_TREES.filter((t) => t.variant === 'plane');
     const cypressTrees = CITY_TREES.filter((t) => t.variant === 'cypress');
 
-    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.28, 3.8, 8);
+    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.28, 3.8, 12);
     trunkGeo.translate(0, 1.9, 0);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 });
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, CITY_TREES.length);
     trunks.castShadow = !this.isSoftwareGl;
 
-    const planeCrownGeo = new THREE.IcosahedronGeometry(2.05, 1);
+    const planeCrownGeo = new THREE.SphereGeometry(2.05, 20, 14);
+    const crownPositions = planeCrownGeo.attributes.position;
+    for (let vertex = 0; vertex < crownPositions.count; vertex += 1) {
+      const x = crownPositions.getX(vertex);
+      const y = crownPositions.getY(vertex);
+      const z = crownPositions.getZ(vertex);
+      const organic = 1
+        + 0.035 * Math.sin(x * 2.7 + z * 1.9) * Math.cos(y * 2.4 - x * 1.3)
+        + 0.018 * Math.sin(y * 5.2 + z * 3.6);
+      crownPositions.setXYZ(vertex, x * organic, y * organic, z * organic);
+    }
+    planeCrownGeo.computeVertexNormals();
     const leafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.78 });
-    const planeCrowns = new THREE.InstancedMesh(planeCrownGeo, leafMat, planeTrees.length);
+    const planeCrowns = new THREE.InstancedMesh(planeCrownGeo, leafMat, planeTrees.length * 3);
     planeCrowns.castShadow = !this.isSoftwareGl;
 
-    const cypGeo = new THREE.ConeGeometry(1.15, 5.4, 8);
+    const cypGeo = new THREE.ConeGeometry(1.15, 5.4, 16, 5);
     cypGeo.translate(0, 2.7, 0);
     const cypCrowns = new THREE.InstancedMesh(cypGeo, leafMat, cypressTrees.length);
     cypCrowns.castShadow = !this.isSoftwareGl;
@@ -709,13 +720,23 @@ export class LeonidaScene3D {
       trunks.setMatrixAt(idx, _mat4);
 
       if (t.variant === 'plane') {
-        _v1.set(tx, 4.4 * s, tz);
-        _scale.set(s * 1.05, s * 0.88, s * 1.05);
-        _mat4.compose(_v1, _quat, _scale);
-        planeCrowns.setMatrixAt(pIdx, _mat4);
-        _col.setHex(pIdx % 2 === 0 ? 0x2f855a : 0x3f8f4e);
-        planeCrowns.setColorAt(pIdx, _col);
-        pIdx += 1;
+        // Three overlapping, organically shaped canopy clusters create a fuller plane tree.
+        const canopyParts = [
+          { x: 0, y: 4.28, z: 0, sx: 1.0, sy: 0.82, sz: 1.0 },
+          { x: -0.72, y: 4.04, z: 0.16, sx: 0.68, sy: 0.66, sz: 0.72 },
+          { x: 0.7, y: 4.18, z: -0.18, sx: 0.72, sy: 0.68, sz: 0.74 },
+        ];
+        for (let partIndex = 0; partIndex < canopyParts.length; partIndex += 1) {
+          const part = canopyParts[partIndex];
+          _v1.set(tx + part.x * s, part.y * s, tz + part.z * s);
+          _scale.set(s * part.sx, s * part.sy, s * part.sz);
+          _mat4.compose(_v1, _quat, _scale);
+          planeCrowns.setMatrixAt(pIdx, _mat4);
+          const canopyColors = [0x356b48, 0x3f784c, 0x477f50];
+          _col.setHex(canopyColors[(idx + partIndex) % canopyColors.length]);
+          planeCrowns.setColorAt(pIdx, _col);
+          pIdx += 1;
+        }
       } else {
         _v1.set(tx, 1.5 * s, tz);
         _scale.set(s, s, s);
