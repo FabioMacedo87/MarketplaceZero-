@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import {
   createBuildingFacadeTextures,
   createLandmarkSignTexture,
@@ -1000,7 +1001,19 @@ export function createBuildingRig(
   const windowGlowMats: THREE.MeshStandardMaterial[] = [warmLobbyMat];
 
   const makeBox = (bw: number, bh: number, bd: number, mat: THREE.Material, x = 0, y = 0, z = 0) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), mat);
+    const isArchitecturalMass =
+      bw >= 5 && bh >= 6 && bd >= 5 &&
+      (mat === facadeMat || mat === SHARED_GRANITE_MAT || mat === SHARED_WHITE_STONE_MAT);
+    const geometry = isArchitecturalMass
+      ? new RoundedBoxGeometry(
+          bw,
+          bh,
+          bd,
+          2,
+          Math.min(0.24, Math.min(bw, bh, bd) * 0.018),
+        )
+      : new THREE.BoxGeometry(bw, bh, bd);
+    const m = new THREE.Mesh(geometry, mat);
     m.position.set(x, y, z);
     m.castShadow = enableShadows;
     m.receiveShadow = enableShadows;
