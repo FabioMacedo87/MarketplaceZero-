@@ -729,6 +729,15 @@ export default function App() {
         life={hud.life}
         cash={hud.cash}
         location={activeLifeLocation}
+        onTalkToNpc={() => {
+          const location = activeLifeLocation;
+          setLifeOpen(false);
+          setActiveLifeLocation(null);
+          if (location) {
+            engineRef.current?.openLifeLocationConversation(location.id);
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }
+        }}
         onClose={() => {
           setLifeOpen(false);
           setActiveLifeLocation(null);
