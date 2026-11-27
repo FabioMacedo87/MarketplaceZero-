@@ -6,6 +6,7 @@ import {
   PackageCheck,
   ShieldAlert,
   UserCheck,
+  Users,
   X,
 } from 'lucide-react';
 import type { ActiveLandmarkActivity } from '../game/types.ts';
@@ -123,6 +124,9 @@ export const ActivityModal: React.FC<ActivityModalProps> = ({
     }
     if (activity.miniGameKind === 'medical_triage') {
       return <Activity className="w-5 h-5 text-rose-400" aria-hidden="true" />;
+    }
+    if (activity.miniGameKind === 'conversation') {
+      return <Users className="w-5 h-5 text-emerald-400" aria-hidden="true" />;
     }
     return <ShieldAlert className="w-5 h-5 text-sky-400" aria-hidden="true" />;
   };
@@ -245,6 +249,21 @@ export const ActivityModal: React.FC<ActivityModalProps> = ({
                   {activity.miniGameKind === 'medical_triage'
                     ? 'Estabilizar Sinais Vitais'
                     : 'Selar Caixa Agora'}
+                </button>
+              </div>
+            )}
+
+            {activity.miniGameKind === 'conversation' && (
+              <div className="p-4 rounded-xl bg-slate-900 border border-emerald-400/25 space-y-3">
+                <p className="text-sm leading-relaxed text-slate-200">
+                  A conversa acontece em {activity.buildingName}. A forma como respondes influencia a tua rede social e o teu bem-estar.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onComplete(1)}
+                  className="w-full min-h-[48px] rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-bold text-sm cursor-pointer"
+                >
+                  Terminar conversa
                 </button>
               </div>
             )}
