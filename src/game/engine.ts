@@ -1200,6 +1200,8 @@ export class LeonidaEngine {
   }
 
   private findNearestLifeLocation(maxDistance = 150): LifeLocation | null {
+    // Daily-life interactions are performed on foot, not from inside a vehicle.
+    if (this.player.vehicleId) return null;
     let nearest: LifeLocation | null = null;
     let nearestDistance = maxDistance;
     for (const location of LIFE_LOCATIONS) {
