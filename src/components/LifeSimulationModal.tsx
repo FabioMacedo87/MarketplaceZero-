@@ -67,11 +67,11 @@ export const LifeSimulationModal: React.FC<LifeSimulationModalProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-4">
           <div className="rounded-xl bg-slate-900 border border-white/10 p-3">
             <p className="text-[11px] text-slate-400">Carteira</p>
-            <p className="text-lg font-bold text-emerald-300 tabular-nums">${cash.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}</p>
+            <p className="text-lg font-bold text-emerald-300 tabular-nums">€{cash.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}</p>
           </div>
           <div className="rounded-xl bg-slate-900 border border-white/10 p-3">
             <p className="text-[11px] text-slate-400">Banco</p>
-            <p className="text-lg font-bold text-sky-300 tabular-nums">${life.bankBalance.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}</p>
+            <p className="text-lg font-bold text-sky-300 tabular-nums">€{life.bankBalance.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}</p>
           </div>
           <div className="rounded-xl bg-slate-900 border border-white/10 p-3 col-span-2 sm:col-span-1">
             <p className="text-[11px] text-slate-400">Profissão atual</p>
