@@ -781,7 +781,7 @@ export class LeonidaScene3D {
     this.lampBulbMat = new THREE.MeshStandardMaterial({
       color: 0xfef3c7,
       emissive: 0xfbbf24,
-      emissiveIntensity: 1.5,
+      emissiveIntensity: 0.7,
       roughness: 0.2,
     });
     const bulbs = new THREE.InstancedMesh(bulbGeo, this.lampBulbMat, lampCoords.length);
@@ -810,12 +810,12 @@ export class LeonidaScene3D {
     this.trafficGreenMat = new THREE.MeshStandardMaterial({
       color: 0x10b981,
       emissive: 0x10b981,
-      emissiveIntensity: 1.8,
+      emissiveIntensity: 0.95,
     });
     this.trafficRedMat = new THREE.MeshStandardMaterial({
       color: 0xef4444,
       emissive: 0xef4444,
-      emissiveIntensity: 1.8,
+      emissiveIntensity: 0.95,
     });
     const tlPoleGeo = new THREE.CylinderGeometry(0.08, 0.1, 4.4, 6);
     tlPoleGeo.translate(0, 2.2, 0);
@@ -1037,7 +1037,7 @@ export class LeonidaScene3D {
     this.gpsArrowMat = new THREE.MeshStandardMaterial({
       color: 0xf59e0b,
       emissive: 0xf59e0b,
-      emissiveIntensity: 1.5,
+      emissiveIntensity: 0.7,
       roughness: 0.25,
       metalness: 0.5,
     });
