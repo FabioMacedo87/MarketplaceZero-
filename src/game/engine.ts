@@ -29,8 +29,19 @@ import type {
   Vehicle,
   VehicleType,
   WeaponId,
+  LifeAction,
+  LifeJobId,
+  LifeSimulationSnapshot,
 } from './types.ts';
 import { WEAPONS, WEAPON_ORDER } from './weapons.ts';
+import {
+  advanceLifeSimulation,
+  createInitialLifeSimulation,
+  loadLifeSave,
+  performLifeAction,
+  saveLifeSave,
+  selectLifeJob,
+} from './lifeSimulation.ts';
 import {
   BUILDINGS,
   HORIZONTAL_ROADS,
@@ -229,6 +240,7 @@ export class LeonidaEngine {
   public mission: Mission;
   public activeActivity: ActiveLandmarkActivity | null = null;
   public emergencyPings: EmergencyPing[] = [];
+  public life: LifeSimulationSnapshot = createInitialLifeSimulation();
 
   public camX = 1640;
   public camY = 880;
@@ -250,6 +262,7 @@ export class LeonidaEngine {
   private autoPromptedMissionId = '';
   private speedAlertCooldown = 0;
   private crashPenaltyCooldown = 0;
+  private lifeSaveAccumulator = 0;
   private latestRemotePlayers = new Map<string, RemotePlayer>();
   private onGameOver: () => void;
   private onOpenGarage: () => void;
@@ -285,6 +298,11 @@ export class LeonidaEngine {
       weaponLevel: 0,
     };
     this.player = this.createInitialPlayer(character, profession);
+    const savedLife = loadLifeSave();
+    if (savedLife) {
+      this.life = savedLife.life;
+      this.player.cash = savedLife.cash;
+    }
     this.mission = this.buildProfessionMission(profession, 1);
     this.queueChapterDialogue(this.mission.chapterNumber, 'intro');
     this.seedWorld();
@@ -328,6 +346,10 @@ export class LeonidaEngine {
     this.character = character;
     this.upgrades = { turboLevel: 0, armorLevel: 0, weaponLevel: 0 };
     this.player = this.createInitialPlayer(character, profession);
+    const savedLife = loadLifeSave();
+    this.life = savedLife?.life ?? createInitialLifeSimulation();
+    if (savedLife) this.player.cash = savedLife.cash;
+    this.lifeSaveAccumulator = 0;
     this.vehicles = [];
     this.bullets = [];
     this.pickups = [];
@@ -491,6 +513,25 @@ export class LeonidaEngine {
     this.queueChapterDialogue(this.mission.chapterNumber, 'intro');
     soundEngine.playPickup();
     this.showToast(`Profissão ativa: ${def.title}`, 3.2);
+  }
+
+  public setLifeJob(job: LifeJobId) {
+    this.life = selectLifeJob(this.life, job);
+    saveLifeSave(this.life, this.player.cash);
+    this.showToast(`Atividade profissional selecionada: ${job}.`, 2.5);
+  }
+
+  public performLifeAction(action: LifeAction) {
+    const result = performLifeAction(this.life, this.player.cash, action);
+    if (!result.ok) {
+      this.showToast(result.message, 3.2);
+      return result;
+    }
+    this.life = result.life;
+    this.player.cash = result.cash;
+    saveLifeSave(this.life, this.player.cash);
+    this.showToast(result.message, 3.2);
+    return result;
   }
 
   public toggleDuty() {
@@ -1181,6 +1222,13 @@ export class LeonidaEngine {
     }
 
     this.dayTime = (this.dayTime + safeDt * 0.004) % 1;
+    // In-game clock: one real second advances one simulated minute.
+    this.life = advanceLifeSimulation(this.life, safeDt);
+    this.lifeSaveAccumulator += safeDt;
+    if (this.lifeSaveAccumulator >= 15) {
+      this.lifeSaveAccumulator = 0;
+      saveLifeSave(this.life, this.player.cash);
+    }
     this.screenShake = Math.max(0, this.screenShake - safeDt * 24);
     if (this.toastTimer > 0) {
       this.toastTimer -= safeDt;
@@ -1882,6 +1930,7 @@ export class LeonidaEngine {
 
     return {
       cash: this.player.cash,
+      life: { ...this.life },
       hp: Math.round(this.player.hp),
       maxHp: this.player.maxHp,
       armor: Math.round(this.player.armor),
