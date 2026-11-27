@@ -278,6 +278,20 @@ export const GameHud: React.FC<GameHudProps> = ({
           </div>
         )}
 
+        {hud.ambientNpcDialogue && (
+          <div
+            className="max-w-[min(92vw,34rem)] px-4 py-2 rounded-xl bg-slate-950/90 border border-white/15 shadow-xl text-center text-xs sm:text-sm text-slate-100 animate-in fade-in slide-in-from-top-1"
+            style={{ borderLeftWidth: 3, borderLeftColor: hud.ambientNpcDialogue.color }}
+            role="status"
+            aria-live="polite"
+          >
+            <span className="font-bold mr-2" style={{ color: hud.ambientNpcDialogue.color }}>
+              {hud.ambientNpcDialogue.speaker}
+            </span>
+            <span>“{hud.ambientNpcDialogue.text}”</span>
+          </div>
+        )}
+
         {hud.canInteractLifeLocation && hud.nearLifeLocation && (
           <button
             type="button"
