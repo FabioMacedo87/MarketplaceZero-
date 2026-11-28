@@ -12,13 +12,85 @@ export type WeaponId = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'rpg';
 
 export type ProfessionId = 'psp' | 'taxi' | 'courier' | 'merchant' | 'paramedic';
 
-export type MiniGameKind = 'cargo_seal' | 'ledger_trade' | 'medical_triage' | 'psp_inspection';
+export type LifeJobId = 'barista' | 'retail' | 'courier' | 'gardener' | 'construction';
+
+export type LifeLocationKind = 'home' | 'cafe' | 'market' | 'garden' | 'depot' | 'construction';
+
+export interface LifeLocation {
+  id: string;
+  kind: LifeLocationKind;
+  label: string;
+  description: string;
+  x: number;
+  y: number;
+  radius: number;
+  markerColor: string;
+  icon: string;
+  npcName: string;
+  npcRole: string;
+  npcColor: string;
+  npcShirtColor: string;
+  npcPersonality?: string;
+  npcAmbition?: string;
+}
+
+export type LifeAction =
+  | 'sleep'
+  | 'shower'
+  | 'cook'
+  | 'drink'
+  | 'buy_supplies'
+  | 'eat_out'
+  | 'work_shift'
+  | 'socialise'
+  | 'study'
+  | 'withdraw_50';
+
+export interface LifeContract {
+  id: string;
+  job: LifeJobId;
+  title: string;
+  description: string;
+  workplace: LifeLocationKind;
+  reward: number;
+  expiresOnDay: number;
+  residentId: string;
+}
+
+export interface LifeSimulationSnapshot {
+  day: number;
+  minuteOfDay: number;
+  energy: number;
+  hunger: number;
+  thirst: number;
+  hygiene: number;
+  mood: number;
+  bankBalance: number;
+  groceries: number;
+  waterBottles: number;
+  job: LifeJobId;
+  jobExperience: number;
+  socialProgress: number;
+  studyProgress: number;
+  /** Interior activities already completed on the current in-game day. */
+  completedInteriorTasks: string[];
+  npcRelationships: Record<string, number>;
+  npcMemories: Record<string, string[]>;
+  cityDemand: Record<LifeLocationKind, number>;
+  lifeContracts: LifeContract[];
+  activeLifeContractId: string | null;
+  completedLifeContracts: number;
+}
+
+export type MiniGameKind = 'cargo_seal' | 'ledger_trade' | 'medical_triage' | 'psp_inspection' | 'conversation';
 
 export interface NpcOption {
   label: string;
   reply: string;
   cashBonus: number;
   repBonus: number;
+  memoryTag?: string;
+  relationshipDelta?: number;
 }
 
 export interface ActiveLandmarkActivity {
@@ -34,6 +106,8 @@ export interface ActiveLandmarkActivity {
   miniGameSubtitle: string;
   phase: 'dialogue' | 'minigame';
   selectedOptionReply: string | null;
+  selectedOptionMemory?: string;
+  selectedRelationshipDelta?: number;
   bonusCash: number;
   bonusRep: number;
   pspTarget?: PspTargetInfo;
@@ -340,8 +414,17 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+export interface AmbientNpcDialogue {
+  speaker: string;
+  text: string;
+  color: string;
+}
+
 export interface HudSnapshot {
   cash: number;
+  life: LifeSimulationSnapshot;
+  nearLifeLocation: LifeLocation | null;
+  canInteractLifeLocation: boolean;
   hp: number;
   maxHp: number;
   armor: number;
@@ -385,6 +468,7 @@ export interface HudSnapshot {
   currentWeapon: WeaponId;
   unlockedWeapons: WeaponId[];
   toastText: string | null;
+  ambientNpcDialogue?: AmbientNpcDialogue | null;
 }
 
 export interface InputState {

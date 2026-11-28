@@ -29,11 +29,26 @@ import type {
   Vehicle,
   VehicleType,
   WeaponId,
+  LifeAction,
+  LifeJobId,
+  LifeLocation,
+  LifeLocationKind,
+  LifeSimulationSnapshot,
 } from './types.ts';
 import { WEAPONS, WEAPON_ORDER } from './weapons.ts';
+import { getInteriorTask } from './interiorTasks.ts';
+import {
+  advanceLifeSimulation,
+  createInitialLifeSimulation,
+  loadLifeSave,
+  performLifeAction,
+  saveLifeSave,
+  selectLifeJob,
+} from './lifeSimulation.ts';
 import {
   BUILDINGS,
   HORIZONTAL_ROADS,
+  LIFE_LOCATIONS,
   MISSION_WAYPOINTS,
   RIVER_START_X,
   SERVICE_ZONES,
@@ -207,14 +222,6 @@ function makeVehicle(
   };
 }
 
-const SCENARIO_ORDER: MissionScenarioId[] = [
-  'saobento_bolsa',
-  'clerigos_musica',
-  'bolhao_gaia',
-  'camara_se',
-  'lello_musica',
-];
-
 export class LeonidaEngine {
   public player: PlayerState;
   public character: CharacterId;
@@ -229,6 +236,7 @@ export class LeonidaEngine {
   public mission: Mission;
   public activeActivity: ActiveLandmarkActivity | null = null;
   public emergencyPings: EmergencyPing[] = [];
+  public life: LifeSimulationSnapshot = createInitialLifeSimulation();
 
   public camX = 1640;
   public camY = 880;
@@ -246,10 +254,15 @@ export class LeonidaEngine {
   private dialogueChapterTitle = '';
   private toastText: string | null = null;
   private toastTimer = 0;
+  private ambientNpcDialogue: import('./types.ts').AmbientNpcDialogue | null = null;
+  private ambientNpcDialogueTimer = 0;
+  private ambientNpcCooldown = 5;
+  private ambientNpcEasterEggUsed = false;
   private missionCounter = 1;
   private autoPromptedMissionId = '';
   private speedAlertCooldown = 0;
   private crashPenaltyCooldown = 0;
+  private lifeSaveAccumulator = 0;
   private latestRemotePlayers = new Map<string, RemotePlayer>();
   private onGameOver: () => void;
   private onOpenGarage: () => void;
@@ -285,6 +298,11 @@ export class LeonidaEngine {
       weaponLevel: 0,
     };
     this.player = this.createInitialPlayer(character, profession);
+    const savedLife = loadLifeSave();
+    if (savedLife) {
+      this.life = savedLife.life;
+      this.player.cash = savedLife.cash;
+    }
     this.mission = this.buildProfessionMission(profession, 1);
     this.queueChapterDialogue(this.mission.chapterNumber, 'intro');
     this.seedWorld();
@@ -328,6 +346,10 @@ export class LeonidaEngine {
     this.character = character;
     this.upgrades = { turboLevel: 0, armorLevel: 0, weaponLevel: 0 };
     this.player = this.createInitialPlayer(character, profession);
+    const savedLife = loadLifeSave();
+    this.life = savedLife?.life ?? createInitialLifeSimulation();
+    if (savedLife) this.player.cash = savedLife.cash;
+    this.lifeSaveAccumulator = 0;
     this.vehicles = [];
     this.bullets = [];
     this.pickups = [];
@@ -337,6 +359,10 @@ export class LeonidaEngine {
     this.guards = [];
     this.activeActivity = null;
     this.emergencyPings = [];
+    this.ambientNpcDialogue = null;
+    this.ambientNpcDialogueTimer = 0;
+    this.ambientNpcCooldown = 5;
+    this.ambientNpcEasterEggUsed = false;
     this.driftCashAccum = 0;
     this.headlightsOn = true;
     this.completedChapters.clear();
@@ -431,12 +457,10 @@ export class LeonidaEngine {
   private buildProfessionMission(
     profession: ProfessionId,
     index: number,
-    forcedScenario?: MissionScenarioId,
   ): Mission {
     const templates = PROFESSION_MISSIONS[profession];
-    const tpl =
-      (forcedScenario ? templates.find((t) => t.scenarioId === forcedScenario) : null) ??
-      templates[(index - 1) % templates.length];
+    const templateIndex = (Math.max(1, index) - 1) % templates.length;
+    const tpl = templates[templateIndex];
 
     const src = BUILDINGS.find((b) => b.id === tpl.sourceId) ?? BUILDINGS[0];
     const dst = BUILDINGS.find((b) => b.id === tpl.destId) ?? BUILDINGS[1];
@@ -491,6 +515,157 @@ export class LeonidaEngine {
     this.queueChapterDialogue(this.mission.chapterNumber, 'intro');
     soundEngine.playPickup();
     this.showToast(`Profissão ativa: ${def.title}`, 3.2);
+  }
+
+  public setLifeJob(job: LifeJobId) {
+    this.life = selectLifeJob(this.life, job);
+    saveLifeSave(this.life, this.player.cash);
+    this.showToast(`Atividade profissional selecionada: ${job}.`, 2.5);
+  }
+
+  public performLifeAction(action: LifeAction, locationKind: LifeLocationKind | null = null) {
+    const acceptedContract = action === 'work_shift' && this.life.activeLifeContractId
+      ? this.life.lifeContracts.find((contract) => contract.id === this.life.activeLifeContractId) ?? null
+      : null;
+    const result = performLifeAction(this.life, this.player.cash, action, locationKind);
+    if (!result.ok) {
+      this.showToast(result.message, 3.2);
+      return result;
+    }
+
+    this.life = result.life;
+    this.player.cash = result.cash;
+    let message = result.message;
+
+    if (acceptedContract && acceptedContract.job === this.life.job && acceptedContract.workplace === locationKind) {
+      const previousRelationship = this.life.npcRelationships[acceptedContract.residentId] ?? 0;
+      const contractRelationship = clamp(previousRelationship + 6);
+      this.life = {
+        ...this.life,
+        bankBalance: this.life.bankBalance + acceptedContract.reward,
+        completedLifeContracts: this.life.completedLifeContracts + 1,
+        activeLifeContractId: null,
+        lifeContracts: this.life.lifeContracts.filter((contract) => contract.id !== acceptedContract.id),
+        cityDemand: {
+          ...this.life.cityDemand,
+          [acceptedContract.workplace]: clamp((this.life.cityDemand[acceptedContract.workplace] ?? 50) - 5, 0, 100),
+        },
+        npcRelationships: {
+          ...this.life.npcRelationships,
+          [acceptedContract.residentId]: contractRelationship,
+        },
+      };
+      this.player.reputation += 4;
+      message += ` Contrato concluído: +${acceptedContract.reward} € no banco. Relação com o cliente: ${contractRelationship}/100.`;
+    }
+
+    saveLifeSave(this.life, this.player.cash);
+    this.showToast(message, 3.6);
+    return { ...result, message, life: this.life, cash: this.player.cash };
+  }
+
+  public acceptLifeContract(contractId: string) {
+    if (this.life.activeLifeContractId) {
+      this.showToast('Já tens um contrato ativo. Conclui-o ou cancela-o antes de aceitar outro.', 3);
+      return;
+    }
+    const contract = this.life.lifeContracts.find((item) => item.id === contractId);
+    if (!contract || contract.expiresOnDay < this.life.day) {
+      this.showToast('Este contrato já não está disponível. Consulta as novas oportunidades.', 3);
+      return;
+    }
+    if (contract.job !== this.life.job) {
+      this.showToast('Seleciona primeiro a atividade profissional exigida pelo contrato.', 3);
+      return;
+    }
+    this.life = { ...this.life, activeLifeContractId: contract.id };
+    saveLifeSave(this.life, this.player.cash);
+    this.showToast(`Contrato aceite: ${contract.title}. Vai trabalhar no local indicado.`, 3.2);
+  }
+
+  public cancelLifeContract() {
+    const activeId = this.life.activeLifeContractId;
+    if (!activeId) return;
+    const contract = this.life.lifeContracts.find((item) => item.id === activeId);
+    this.life = {
+      ...this.life,
+      activeLifeContractId: null,
+      lifeContracts: this.life.lifeContracts.filter((item) => item.id !== activeId),
+    };
+    saveLifeSave(this.life, this.player.cash);
+    this.showToast(contract ? `Contrato cancelado: ${contract.title}.` : 'Contrato cancelado.', 2.8);
+  }
+
+  public completeInteriorTask(
+    locationKind: LifeLocationKind,
+    taskId: string,
+  ): { ok: boolean; message: string } {
+    if (this.player.vehicleId) {
+      return { ok: false, message: 'Sai do veículo antes de executar uma tarefa.' };
+    }
+    const currentLocation = this.findNearestLifeLocation(150);
+    if (!currentLocation || currentLocation.kind !== locationKind) {
+      return { ok: false, message: 'Não estás no local correspondente a esta tarefa.' };
+    }
+    const task = getInteriorTask(locationKind, taskId);
+    if (!task) {
+      return { ok: false, message: 'Esta tarefa não está disponível neste espaço.' };
+    }
+    if (this.life.completedInteriorTasks.includes(task.id)) {
+      return { ok: false, message: 'Esta tarefa já foi concluída hoje. Volta amanhã.' };
+    }
+    if (task.requiredJob && this.life.job !== task.requiredJob) {
+      const jobNames: Record<LifeJobId, string> = {
+        barista: 'empregado de café',
+        retail: 'comércio',
+        courier: 'estafeta',
+        gardener: 'jardinagem',
+        construction: 'construção',
+      };
+      return {
+        ok: false,
+        message: 'Esta tarefa exige a profissão de ' + jobNames[task.requiredJob] + '.',
+      };
+    }
+    if (task.energyCost > 0 && this.life.energy < task.energyCost) {
+      return { ok: false, message: 'Estás demasiado cansado para concluir esta tarefa. Descansa primeiro.' };
+    }
+
+    let nextLife = this.life;
+    let nextCash = this.player.cash;
+    if (task.lifeAction) {
+      const result = performLifeAction(this.life, this.player.cash, task.lifeAction, locationKind);
+      if (!result.ok) {
+        this.showToast(result.message, 3);
+        return { ok: false, message: result.message };
+      }
+      nextLife = result.life;
+      nextCash = result.cash;
+    } else {
+      nextLife = advanceLifeSimulation(this.life, task.durationMinutes);
+      nextLife = {
+        ...nextLife,
+        energy: clamp(nextLife.energy - task.energyCost),
+        mood: clamp(nextLife.mood + 2),
+        jobExperience: task.requiredJob ? nextLife.jobExperience + 1 : nextLife.jobExperience,
+      };
+      nextCash += task.cashReward;
+    }
+
+    // A task is only committed after its gameplay effects have succeeded.
+    nextLife = {
+      ...nextLife,
+      completedInteriorTasks: [...nextLife.completedInteriorTasks, task.id],
+    };
+    this.life = nextLife;
+    this.player.cash = nextCash;
+    saveLifeSave(this.life, this.player.cash);
+    soundEngine.playPickup();
+    this.showToast(task.successMessage + (task.cashReward > 0 ? ' +' + task.cashReward + ' €.' : ''), 3.2);
+    return {
+      ok: true,
+      message: task.successMessage + (task.cashReward > 0 ? ' Recebeste ' + task.cashReward + ' €.' : ''),
+    };
   }
 
   public toggleDuty() {
@@ -656,6 +831,8 @@ export class LeonidaEngine {
     this.activeActivity.selectedOptionReply = opt.reply;
     this.activeActivity.bonusCash = opt.cashBonus;
     this.activeActivity.bonusRep = opt.repBonus;
+    this.activeActivity.selectedOptionMemory = opt.memoryTag ?? 'friendly-chat';
+    this.activeActivity.selectedRelationshipDelta = opt.relationshipDelta;
     soundEngine.playPickup();
   }
 
@@ -672,6 +849,33 @@ export class LeonidaEngine {
     this.activeActivity = null;
 
     const perf = clamp(performanceMul, 0.5, 1.5);
+
+    if (act.id.startsWith('life-location-')) {
+      const baseSocialGain = Math.max(2, Math.round(act.bonusRep * perf));
+      const location = LIFE_LOCATIONS.find((item) => act.id.startsWith(`life-location-${item.id}-`));
+      const relationshipDelta = act.selectedRelationshipDelta ?? Math.max(1, Math.round(baseSocialGain * 0.8));
+      const socialGain = relationshipDelta < 0 ? 0 : baseSocialGain;
+      this.life = advanceLifeSimulation(this.life, 10);
+      this.life.socialProgress = clamp(this.life.socialProgress + socialGain);
+      this.life.mood = clamp(this.life.mood + (relationshipDelta < 0 ? -8 : 5 + act.bonusRep));
+      if (location) {
+        const previous = this.life.npcRelationships[location.id] ?? 0;
+        const relationshipScore = clamp(previous + relationshipDelta);
+        this.life.npcRelationships = { ...this.life.npcRelationships, [location.id]: relationshipScore };
+        const topic = act.selectedOptionMemory ?? 'friendly-chat';
+        const memories = this.life.npcMemories[location.id] ?? [];
+        this.life.npcMemories = { ...this.life.npcMemories, [location.id]: [...memories.filter((tag) => tag !== topic), topic].slice(-12) };
+      }
+      const cashBonus = Math.round(act.bonusCash * perf);
+      this.player.cash += cashBonus;
+      this.player.reputation += socialGain;
+      saveLifeSave(this.life, this.player.cash);
+      soundEngine.playPickup();
+      const score = location ? this.life.npcRelationships[location.id] ?? 0 : 0;
+      const outcome = relationshipDelta < 0 ? 'Criaste tensão na conversa' : 'A relação evoluiu';
+      this.showToast(location ? `${outcome} com ${act.npcName}: ${score}/100 · Rede social +${socialGain}.` : `Conversaste com ${act.npcName}. Rede social +${socialGain}.`, 3.4);
+      return;
+    }
 
     // Standalone PSP stop OR PSP mission activity
     if (act.miniGameKind === 'psp_inspection' && act.pspTarget) {
@@ -1141,6 +1345,114 @@ export class LeonidaEngine {
     return best;
   }
 
+  private findNearestLifeLocation(maxDistance = 150): LifeLocation | null {
+    // Daily-life interactions are performed on foot, not from inside a vehicle.
+    if (this.player.vehicleId) return null;
+    let nearest: LifeLocation | null = null;
+    let nearestDistance = maxDistance;
+    for (const location of LIFE_LOCATIONS) {
+      const distance = dist(this.player.x, this.player.y, location.x, location.y);
+      if (distance <= location.radius && distance < nearestDistance) {
+        nearest = location;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
+  }
+
+  public openLifeLocationConversation(locationId: string) {
+    if (this.activeActivity) return;
+    const location = LIFE_LOCATIONS.find((item) => item.id === locationId);
+    if (!location || dist(this.player.x, this.player.y, location.x, location.y) > location.radius) {
+      this.showToast('Aproxima-te ao local antes de conversar.', 2.4);
+      return;
+    }
+
+    const relationship = this.life.npcRelationships[location.id] ?? 0;
+    const memories = this.life.npcMemories[location.id] ?? [];
+    const lastTopic = memories[memories.length - 1];
+    const rememberedTopic = lastTopic === 'work-opportunities'
+      ? 'Da última vez perguntaste por oportunidades de trabalho.'
+      : lastTopic === 'local-recommendations'
+        ? 'Lembro-me de te ter dado dicas sobre esta zona.'
+        : lastTopic === 'friendly-chat'
+          ? 'Já tivemos oportunidade de conversar.'
+          : lastTopic === 'conflict'
+            ? 'A nossa última conversa não correu pelo melhor.'
+            : lastTopic === 'reconciliation'
+              ? 'Fico contente por termos esclarecido o mal-entendido.'
+              : '';
+    const personality = location.npcPersonality ? ` Sou ${location.npcPersonality.toLowerCase()}.` : '';
+    const ambition = location.npcAmbition ? ` Neste momento, quero ${location.npcAmbition}.` : '';
+    const greeting = relationship >= 70
+      ? `Que bom ver-te outra vez! Já ganhaste a minha confiança. ${rememberedTopic}${personality}${ambition}`
+      : relationship >= 40
+        ? `Olá outra vez! Já nos conhecemos bem. ${rememberedTopic}${personality}${ambition}`
+        : memories.length > 0 ? `Olá! Voltaste. ${rememberedTopic}${personality}${ambition}` : location.description + '.' + personality + ambition + ' Como posso ajudar?';
+
+    const options = [
+      {
+        label: memories.includes('friendly-chat') ? 'Pôr a conversa em dia' : 'Cumprimentar e conversar',
+        reply: 'É sempre bom conhecer melhor quem vive e trabalha nesta zona do Porto.',
+        cashBonus: 0,
+        repBonus: 3,
+        memoryTag: 'friendly-chat',
+        relationshipDelta: 4,
+      },
+      {
+        label: memories.includes('work-opportunities') ? 'Perguntar se há novidades de trabalho' : 'Perguntar por oportunidades e atividades',
+        reply: memories.includes('work-opportunities') ? 'Continuo atento a novas oportunidades. A procura muda todos os dias; consulta o quadro de contratos.' : 'Posso indicar-te o que se passa por aqui. Consulta o quadro de contratos e participa na comunidade.',
+        cashBonus: 2,
+        repBonus: 4,
+        memoryTag: 'work-opportunities',
+        relationshipDelta: relationship >= 55 ? 6 : 3,
+      },
+      {
+        label: memories.includes('local-recommendations') ? 'Descobrir mais sítios' : 'Pedir uma recomendação local',
+        reply: 'Fica a conhecer os pequenos negócios e os serviços da zona. A cidade tem muito para descobrir.',
+        cashBonus: 0,
+        repBonus: 5,
+        memoryTag: 'local-recommendations',
+        relationshipDelta: 5,
+      },
+    ];
+    if (memories.includes('conflict') || relationship < 20) {
+      options.push({
+        label: 'Pedir desculpa e esclarecer um mal-entendido',
+        reply: 'Agradeço a tua atitude. Nem sempre concordamos, mas podemos recomeçar com respeito.',
+        cashBonus: 0,
+        repBonus: 5,
+        memoryTag: 'reconciliation',
+        relationshipDelta: 9,
+      });
+    }
+    options.push({
+      label: 'Discordar de forma brusca',
+      reply: 'Não gostei da forma como falaste comigo. A confiança constrói-se com respeito.',
+      cashBonus: 0,
+      repBonus: 0,
+      memoryTag: 'conflict',
+      relationshipDelta: -10,
+    });
+
+    this.activeActivity = {
+      id: `life-location-${location.id}-${Date.now()}`,
+      buildingName: location.label,
+      npcName: location.npcName,
+      npcRole: location.npcRole,
+      npcColor: location.npcColor,
+      greeting,
+      options,
+      miniGameKind: 'conversation',
+      miniGameTitle: 'Conversa com ' + location.npcName,
+      miniGameSubtitle: 'As tuas escolhas alteram a confiança. Podes criar amizade, reparar um conflito ou afastar o residente.',
+      phase: 'dialogue',
+      selectedOptionReply: null,
+      bonusCash: 0,
+      bonusRep: 0,
+    };
+  }
+
   public focusBuildingWaypoint(buildingId: string) {
     const b = BUILDINGS.find((item) => item.id === buildingId);
     if (!b) return;
@@ -1167,6 +1479,18 @@ export class LeonidaEngine {
     this.showToast(`GPS definido para ${b.label}!`, 3);
   }
 
+  public advanceLifeClockWhileIndoors(dt: number) {
+    const safeDt = Math.max(0, Math.min(dt, 0.05));
+    if (safeDt === 0) return;
+    this.dayTime = (this.dayTime + safeDt * 0.004) % 1;
+    this.life = advanceLifeSimulation(this.life, safeDt);
+    this.lifeSaveAccumulator += safeDt;
+    if (this.lifeSaveAccumulator >= 15) {
+      this.lifeSaveAccumulator = 0;
+      saveLifeSave(this.life, this.player.cash);
+    }
+  }
+
   public update(
     dt: number,
     input: InputState,
@@ -1181,6 +1505,13 @@ export class LeonidaEngine {
     }
 
     this.dayTime = (this.dayTime + safeDt * 0.004) % 1;
+    // In-game clock: one real second advances one simulated minute.
+    this.life = advanceLifeSimulation(this.life, safeDt);
+    this.lifeSaveAccumulator += safeDt;
+    if (this.lifeSaveAccumulator >= 15) {
+      this.lifeSaveAccumulator = 0;
+      saveLifeSave(this.life, this.player.cash);
+    }
     this.screenShake = Math.max(0, this.screenShake - safeDt * 24);
     if (this.toastTimer > 0) {
       this.toastTimer -= safeDt;
@@ -1639,6 +1970,71 @@ export class LeonidaEngine {
         p.panicTimer = 2;
       }
     }
+
+    // Nearby pedestrians now start short ambient conversations without a button press.
+    if (this.dialogueIndex < this.dialogueQueue.length) {
+      this.ambientNpcDialogue = null;
+      this.ambientNpcDialogueTimer = 0;
+    }
+    if (this.ambientNpcDialogueTimer > 0) {
+      this.ambientNpcDialogueTimer = Math.max(0, this.ambientNpcDialogueTimer - dt);
+      if (this.ambientNpcDialogueTimer === 0) this.ambientNpcDialogue = null;
+    }
+    this.ambientNpcCooldown = Math.max(0, this.ambientNpcCooldown - dt);
+
+    if (
+      this.ambientNpcDialogueTimer <= 0 &&
+      this.ambientNpcCooldown <= 0 &&
+      !this.activeActivity &&
+      this.dialogueIndex >= this.dialogueQueue.length &&
+      !this.player.vehicleId
+    ) {
+      let nearestPedestrian: Pedestrian | null = null;
+      let nearestDistance = 132;
+      for (const pedestrian of this.pedestrians) {
+        const distance = dist(this.player.x, this.player.y, pedestrian.x, pedestrian.y);
+        if (distance < nearestDistance && pedestrian.panicTimer <= 0) {
+          nearestPedestrian = pedestrian;
+          nearestDistance = distance;
+        }
+      }
+
+      if (nearestPedestrian) {
+        const names = ['Tiago', 'Marta', 'Rui', 'Inês', 'Duarte', 'Sofia', 'Nuno', 'Carla', 'Zé', 'Leonor'];
+        const chatter = [
+          'Este trânsito na Baixa está pior do que ontem.',
+          'Alguém sabe se a Ponte Dom Luís está mais livre?',
+          'O café da esquina tem uma meia de leite muito boa.',
+          'Dizem que hoje há música ao vivo nos Aliados.',
+          'Cuidado com a calçada, está escorregadia.',
+          'Vou passar pelo Bolhão antes de ir para casa.',
+          'O Douro está bonito ao fim da tarde.',
+          'Conheces alguma rua aqui perto com estacionamento?',
+          'Hoje a Ribeira está cheia de turistas.',
+          'Ainda vou a tempo de apanhar o metro em São Bento?',
+          'Quem é vivo sempre aparece!',
+          'Esta cidade tem sempre qualquer coisa a acontecer.',
+        ];
+        let text = chatter[Math.floor(Math.random() * chatter.length)];
+
+        // Rare, short cultural Easter egg from the Portuguese web-video saga.
+        if (!this.ambientNpcEasterEggUsed && Math.random() < 0.035) {
+          text = Math.random() < 0.5
+            ? 'EU QUERO O MEU SECADOR!'
+            : 'Quem é viva sempre aparece!';
+          this.ambientNpcEasterEggUsed = true;
+        }
+
+        const nameIndex = Number(nearestPedestrian.id.replace(/\D/g, '')) || 0;
+        this.ambientNpcDialogue = {
+          speaker: names[nameIndex % names.length],
+          text,
+          color: nearestPedestrian.shirtColor,
+        };
+        this.ambientNpcDialogueTimer = 4.8;
+        this.ambientNpcCooldown = 17 + Math.random() * 12;
+      }
+    }
   }
 
   private triggerRocketExplosion(x: number, y: number, remotePlayers?: Map<string, RemotePlayer>) {
@@ -1799,11 +2195,9 @@ export class LeonidaEngine {
 
         const completedCh = getStoryChapterByNumber(this.mission.chapterNumber);
         this.missionCounter += 1;
-        const nextScenario = SCENARIO_ORDER[(this.missionCounter - 1) % SCENARIO_ORDER.length];
         this.mission = this.buildProfessionMission(
           this.player.profession,
           this.missionCounter,
-          nextScenario,
         );
         const nextCh = getStoryChapterByNumber(this.mission.chapterNumber);
         this.dialogueQueue = [...completedCh.outroLines, ...nextCh.introLines];
@@ -1847,6 +2241,7 @@ export class LeonidaEngine {
     const nearVeh = !veh ? this.findNearestVehicle(84) : null;
     const nearZone = this.findNearestServiceZone();
     const nearBuilding = this.findNearestBuilding();
+    const nearLifeLocation = this.findNearestLifeLocation();
     const profDef = PROFESSIONS[this.player.profession];
 
     let timeOfDayLabel = 'Entardecer no Douro';
@@ -1882,6 +2277,7 @@ export class LeonidaEngine {
 
     return {
       cash: this.player.cash,
+      life: { ...this.life },
       hp: Math.round(this.player.hp),
       maxHp: this.player.maxHp,
       armor: Math.round(this.player.armor),
@@ -1895,6 +2291,8 @@ export class LeonidaEngine {
       nearServiceZone: nearZone ? nearZone.label : null,
       nearBuildingId: nearBuilding ? nearBuilding.id : null,
       nearBuildingName: nearBuilding ? nearBuilding.label : null,
+      nearLifeLocation,
+      canInteractLifeLocation: Boolean(nearLifeLocation),
       missionTitle: this.mission.title,
       missionObjective: canInteractMission
         ? `Premir [G] para falar com ${this.mission.npcName}`
@@ -1927,6 +2325,7 @@ export class LeonidaEngine {
       currentWeapon: this.player.currentWeapon,
       unlockedWeapons: [...this.player.unlockedWeapons],
       toastText: this.toastText,
+      ambientNpcDialogue: this.ambientNpcDialogue,
     };
   }
 }

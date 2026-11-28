@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { FXAAPass } from 'three/addons/postprocessing/FXAAPass.js';
@@ -30,13 +31,15 @@ import {
   createWaterNormalTexture,
 } from './textures.ts';
 import { PROFESSIONS } from './professions.ts';
-import type { CameraMode, CharacterId, ProfessionId, RemotePlayer } from './types.ts';
+import { getOutdoorNpcSchedule } from './npcSchedules.ts';
+import type { CameraMode, CharacterId, LifeLocation, ProfessionId, RemotePlayer } from './types.ts';
 import type { LeonidaEngine } from './engine.ts';
 import {
   BRIDGE_YS,
   BUILDINGS,
   CITY_TREES,
   HORIZONTAL_ROADS,
+  LIFE_LOCATIONS,
   RIVER_END_X,
   RIVER_START_X,
   ROAD_WIDTH,
@@ -88,6 +91,13 @@ function detectSoftwareWebGL(): boolean {
   }
 }
 
+interface RealisticPlayerAsset {
+  group: THREE.Group;
+  mixer: THREE.AnimationMixer;
+  actions: Map<'idle' | 'walk' | 'jog' | 'run', THREE.AnimationAction>;
+  activeAction: THREE.AnimationAction | null;
+}
+
 export class LeonidaScene3D {
   public readonly isSoftwareGl: boolean;
   public readonly renderer: THREE.WebGLRenderer;
@@ -131,9 +141,17 @@ export class LeonidaScene3D {
   private pedRigs = new Map<string, CharacterRig>();
   private guardRigs = new Map<string, CharacterRig>();
   private pickupMeshes = new Map<string, THREE.Group>();
+  private lifeLocationMarkers = new Map<
+    string,
+    { group: THREE.Group; ring: THREE.Mesh; ringMaterial: THREE.MeshBasicMaterial; orb: THREE.Mesh }
+  >();
+  private lifeLocationNpcs = new Map<string, CharacterRig>();
   private remoteRigs = new Map<string, RemoteRenderEntry>();
   private playerRig: CharacterRig;
   private playerCharacter: CharacterId;
+  private readonly assetLoader = new GLTFLoader();
+  private realisticPlayer: RealisticPlayerAsset | null = null;
+  private realisticPlayerLoadToken = 0;
 
   private bulletMesh: THREE.InstancedMesh;
   private particleMesh: THREE.InstancedMesh;
@@ -169,7 +187,7 @@ export class LeonidaScene3D {
     );
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = 0.94;
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     if (!this.isSoftwareGl) {
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -184,7 +202,7 @@ export class LeonidaScene3D {
     this.renderer.domElement.addEventListener('webglcontextrestored', this.handleContextRestored);
 
     this.scene = new THREE.Scene();
-    this.fog = new THREE.FogExp2(0xe2b695, 0.0021);
+    this.fog = new THREE.FogExp2(0xb9c7d4, 0.00175);
     this.scene.fog = this.fog;
 
     const aspect =
@@ -197,24 +215,24 @@ export class LeonidaScene3D {
     const roomEnv = new RoomEnvironment();
     const envTex = pmrem.fromScene(roomEnv, 0.04).texture;
     this.scene.environment = envTex;
-    this.scene.environmentIntensity = 0.72;
+    this.scene.environmentIntensity = 0.58;
     roomEnv.dispose();
     pmrem.dispose();
     this.disposables.push(envTex);
 
     this.skyUniforms = {
-      uTopColor: { value: new THREE.Color('#275596') },
-      uHorizonColor: { value: new THREE.Color('#f7b585') },
-      uSunColor: { value: new THREE.Color('#ffe09e') },
+      uTopColor: { value: new THREE.Color('#38689a') },
+      uHorizonColor: { value: new THREE.Color('#d9c8b8') },
+      uSunColor: { value: new THREE.Color('#fff0d6') },
       uSunDir: { value: new THREE.Vector3(-0.7, 0.3, -0.5).normalize() },
       uTime: { value: 0 },
     };
     this.buildSkyDome();
 
-    this.hemiLight = new THREE.HemisphereLight(0xcfe4ff, 0x2b2824, 0.9);
+    this.hemiLight = new THREE.HemisphereLight(0xd8e6f4, 0x34302b, 0.72);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight(0xffdfb0, 2.35);
+    this.sunLight = new THREE.DirectionalLight(0xffecd4, 1.78);
     this.sunLight.position.set(-80, 52, -60);
     this.sunLight.castShadow = !this.isSoftwareGl;
     if (!this.isSoftwareGl) {
@@ -247,6 +265,8 @@ export class LeonidaScene3D {
     this.buildCityTreesAndStreetLamps();
     this.buildRabeloBoatsAndTram();
     this.buildServiceAndMissionMarkers();
+    this.buildLifeLocationMarkers();
+    this.buildLifeLocationNpcs();
 
     this.playerRig = createCharacterRig(
       true,
@@ -256,6 +276,7 @@ export class LeonidaScene3D {
       'pistol',
     );
     this.scene.add(this.playerRig.group);
+    void this.loadRealisticPlayerModel(initialCharacter);
 
     const bulletGeo = new THREE.SphereGeometry(0.18, 6, 6);
     const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -299,10 +320,10 @@ export class LeonidaScene3D {
       this.composer.setSize(w, h);
 
       const renderPass = new RenderPass(this.scene, this.camera);
-      const bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.24, 0.42, 0.9);
+      const bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.075, 0.28, 0.94);
       const vignettePass = new ShaderPass(VignetteShader);
       vignettePass.uniforms['offset'].value = 0.88;
-      vignettePass.uniforms['darkness'].value = 0.92;
+      vignettePass.uniforms['darkness'].value = 0.24;
       const outputPass = new OutputPass();
       const fxaaPass = new FXAAPass();
 
@@ -386,12 +407,12 @@ export class LeonidaScene3D {
             float n = fbm(cloudUv);
             float cloudMask = smoothstep(0.52, 0.8, n) * smoothstep(0.04, 0.28, dir.y);
             vec3 cloudCol = mix(uHorizonColor * 1.15 + vec3(0.18), uSunColor * 1.1, 0.42);
-            col = mix(col, cloudCol, cloudMask * 0.45);
+            col = mix(col, cloudCol, cloudMask * 0.28);
           }
 
           float sunAmt = max(dot(dir, normalize(uSunDir)), 0.0);
-          col += uSunColor * pow(sunAmt, 44.0) * 1.05;
-          col += uSunColor * pow(sunAmt, 7.0) * 0.28;
+          col += uSunColor * pow(sunAmt, 44.0) * 0.58;
+          col += uSunColor * pow(sunAmt, 7.0) * 0.13;
           gl_FragColor = vec4(col, 1.0);
         }
       `,
@@ -495,75 +516,254 @@ export class LeonidaScene3D {
     this.scene.add(river);
     this.disposables.push(riverGeo, riverMat);
 
-    // 3. Porto Cobblestone Granite Streets (Paralelo do Porto)
+    // 3. Realistic asphalt, four-lane markings, raised Portuguese sidewalks and curbs.
     const {
       map: streetMap,
       roughnessMap: streetRough,
       normalMap: streetNorm,
     } = createAsphaltTextures(anisotropy);
-    const roadW = ROAD_WIDTH * WORLD_SCALE;
     this.disposables.push(streetMap, streetRough, streetNorm);
+
+    const roadW = ROAD_WIDTH * WORLD_SCALE;
+    const addRoadSurface = (length: number, horizontal: boolean, x: number, z: number) => {
+      const map = streetMap.clone();
+      const roughnessMap = streetRough.clone();
+      const normalMap = streetNorm.clone();
+      for (const texture of [map, roughnessMap, normalMap]) {
+        texture.needsUpdate = true;
+        texture.repeat.set(1, length / 16);
+        this.disposables.push(texture);
+      }
+
+      const material = new THREE.MeshStandardMaterial({
+        map,
+        roughnessMap,
+        normalMap,
+        normalScale: new THREE.Vector2(0.34, 0.34),
+        roughness: 0.88,
+        metalness: 0.015,
+      });
+      const geometry = new THREE.PlaneGeometry(roadW, length);
+      geometry.rotateX(-Math.PI / 2);
+      if (horizontal) geometry.rotateY(Math.PI / 2);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(x, 0.095, z);
+      mesh.receiveShadow = !this.isSoftwareGl;
+      this.scene.add(mesh);
+      this.disposables.push(geometry, material);
+    };
 
     for (const rx of VERTICAL_ROADS) {
       const roadLen = worldH + 140;
-      const texClone = streetMap.clone();
-      texClone.needsUpdate = true;
-      texClone.repeat.set(1, roadLen / 20);
-      const rMat = new THREE.MeshStandardMaterial({
-        map: texClone,
-        roughnessMap: streetRough,
-        normalMap: streetNorm,
-        normalScale: new THREE.Vector2(0.85, 0.85),
-        roughness: 0.66,
-        metalness: 0.12,
-      });
-      const rGeo = new THREE.PlaneGeometry(roadW, roadLen);
-      rGeo.rotateX(-Math.PI / 2);
-      const mesh = new THREE.Mesh(rGeo, rMat);
-      mesh.position.set(rx * WORLD_SCALE, 0.09, worldH * 0.5);
-      mesh.receiveShadow = !this.isSoftwareGl;
-      this.scene.add(mesh);
-      this.disposables.push(texClone, rGeo, rMat);
+      addRoadSurface(roadLen, false, rx * WORLD_SCALE, worldH * 0.5);
     }
 
     for (const ry of HORIZONTAL_ROADS) {
-      const isBridgeRow = BRIDGE_YS.includes(ry);
-      const roadStart = 0;
-      const roadEnd = isBridgeRow ? WORLD_W * WORLD_SCALE + 60 : portoBankX;
-      const roadLen = roadEnd - roadStart;
-      const texClone = streetMap.clone();
-      texClone.needsUpdate = true;
-      texClone.repeat.set(1, roadLen / 20);
-      const rMat = new THREE.MeshStandardMaterial({
-        map: texClone,
-        roughnessMap: streetRough,
-        normalMap: streetNorm,
-        normalScale: new THREE.Vector2(0.85, 0.85),
-        roughness: 0.66,
-        metalness: 0.12,
-      });
-      const rGeo = new THREE.PlaneGeometry(roadW, roadLen);
-      rGeo.rotateX(-Math.PI / 2);
-      rGeo.rotateY(Math.PI / 2);
-      const mesh = new THREE.Mesh(rGeo, rMat);
-      mesh.position.set(roadLen * 0.5, 0.095, ry * WORLD_SCALE);
-      mesh.receiveShadow = !this.isSoftwareGl;
-      this.scene.add(mesh);
-      this.disposables.push(texClone, rGeo, rMat);
-
-      if (!isBridgeRow) {
-        // Also draw Gaia horizontal street segment
-        const gLen = WORLD_W * WORLD_SCALE - gaiaStartX + 40;
-        const gGeo = new THREE.PlaneGeometry(roadW, gLen);
-        gGeo.rotateX(-Math.PI / 2);
-        gGeo.rotateY(Math.PI / 2);
-        const gMesh = new THREE.Mesh(gGeo, rMat);
-        gMesh.position.set(gaiaStartX + gLen * 0.5, 0.095, ry * WORLD_SCALE);
-        gMesh.receiveShadow = !this.isSoftwareGl;
-        this.scene.add(gMesh);
-        this.disposables.push(gGeo);
+      const bridgeRow = BRIDGE_YS.includes(ry);
+      if (bridgeRow) {
+        const length = WORLD_W * WORLD_SCALE + 60;
+        addRoadSurface(length, true, length * 0.5, ry * WORLD_SCALE);
+      } else {
+        addRoadSurface(portoBankX, true, portoBankX * 0.5, ry * WORLD_SCALE);
+        const gaiaLength = WORLD_W * WORLD_SCALE - gaiaStartX;
+        addRoadSurface(gaiaLength, true, gaiaLength * 0.5 + gaiaStartX, ry * WORLD_SCALE);
       }
     }
+
+    // Sidewalk texture is tiled by geometry UVs so every block keeps natural stone scale.
+    const sidewalkWidth = 2.35;
+    const sidewalkTexture = calcadaTex.clone();
+    sidewalkTexture.repeat.set(1, 1);
+    sidewalkTexture.needsUpdate = true;
+    const sidewalkMaterial = new THREE.MeshStandardMaterial({
+      map: sidewalkTexture,
+      roughness: 0.92,
+      metalness: 0.015,
+    });
+    const curbMaterial = new THREE.MeshStandardMaterial({
+      color: 0x918b80,
+      roughness: 0.9,
+      metalness: 0.02,
+    });
+    this.disposables.push(sidewalkTexture, sidewalkMaterial, curbMaterial);
+
+    const openStreetSegments = (start: number, end: number, crossings: number[]) => {
+      const gap = roadW * 0.5 + 0.45;
+      const sorted = crossings
+        .filter((value) => value > start - gap && value < end + gap)
+        .sort((a, b) => a - b);
+      const segments: [number, number][] = [];
+      let cursor = start;
+      for (const crossing of sorted) {
+        const gapStart = Math.max(start, crossing - gap);
+        const gapEnd = Math.min(end, crossing + gap);
+        if (gapStart - cursor > 2.8) segments.push([cursor, gapStart]);
+        cursor = Math.max(cursor, gapEnd);
+      }
+      if (end - cursor > 2.8) segments.push([cursor, end]);
+      return segments;
+    };
+
+    const addSidewalkSegment = (
+      vertical: boolean,
+      fixed: number,
+      from: number,
+      to: number,
+      side: number,
+    ) => {
+      const length = to - from;
+      if (length < 2.8) return;
+      const geometry = new THREE.PlaneGeometry(
+        sidewalkWidth,
+        length,
+        1,
+        Math.max(1, Math.ceil(length / 2.5)),
+      );
+      geometry.rotateX(-Math.PI / 2);
+      if (!vertical) geometry.rotateY(Math.PI / 2);
+      const uv = geometry.attributes.uv as THREE.BufferAttribute;
+      for (let i = 0; i < uv.count; i += 1) {
+        uv.setY(i, uv.getY(i) * (length / 2.5));
+      }
+      uv.needsUpdate = true;
+
+      const walkway = new THREE.Mesh(geometry, sidewalkMaterial);
+      const sideOffset = roadW * 0.5 + 0.1 + sidewalkWidth * 0.5;
+      if (vertical) {
+        walkway.position.set(fixed + side * sideOffset, 0.148, (from + to) * 0.5);
+      } else {
+        walkway.position.set((from + to) * 0.5, 0.148, fixed + side * sideOffset);
+      }
+      walkway.receiveShadow = !this.isSoftwareGl;
+      this.scene.add(walkway);
+      this.disposables.push(geometry);
+
+      const curbGeometry = vertical
+        ? new THREE.BoxGeometry(0.2, 0.2, length)
+        : new THREE.BoxGeometry(length, 0.2, 0.2);
+      const curb = new THREE.Mesh(curbGeometry, curbMaterial);
+      if (vertical) {
+        curb.position.set(fixed + side * (roadW * 0.5 + 0.1), 0.15, (from + to) * 0.5);
+      } else {
+        curb.position.set((from + to) * 0.5, 0.15, fixed + side * (roadW * 0.5 + 0.1));
+      }
+      curb.receiveShadow = !this.isSoftwareGl;
+      this.scene.add(curb);
+      this.disposables.push(curbGeometry);
+    };
+
+    for (const rx of VERTICAL_ROADS) {
+      const segments = openStreetSegments(0, worldH, HORIZONTAL_ROADS.map((ry) => ry * WORLD_SCALE));
+      for (const [from, to] of segments) {
+        addSidewalkSegment(true, rx * WORLD_SCALE, from, to, -1);
+        addSidewalkSegment(true, rx * WORLD_SCALE, from, to, 1);
+      }
+    }
+
+    for (const ry of HORIZONTAL_ROADS) {
+      const bridgeRow = BRIDGE_YS.includes(ry);
+      const spans: [number, number][] = bridgeRow
+        ? [[0, WORLD_W * WORLD_SCALE]]
+        : [[0, portoBankX], [gaiaStartX, WORLD_W * WORLD_SCALE]];
+      for (const [start, end] of spans) {
+        const segments = openStreetSegments(start, end, VERTICAL_ROADS.map((rx) => rx * WORLD_SCALE));
+        for (const [from, to] of segments) {
+          addSidewalkSegment(false, ry * WORLD_SCALE, from, to, -1);
+          addSidewalkSegment(false, ry * WORLD_SCALE, from, to, 1);
+        }
+      }
+    }
+
+    // Painted lane dividers are separate meshes, with gaps at junctions.
+    const dashGeometry = new THREE.PlaneGeometry(0.14, 3.35);
+    dashGeometry.rotateX(-Math.PI / 2);
+    const lanePaint = new THREE.MeshBasicMaterial({
+      color: 0xe9e7df,
+      transparent: true,
+      opacity: 0.84,
+      depthWrite: false,
+    });
+    const dashTransforms: { x: number; z: number; rotation: number }[] = [];
+    const laneOffsets = [-3.55, 0, 3.55];
+
+    for (const rx of VERTICAL_ROADS) {
+      const x = rx * WORLD_SCALE;
+      for (let z = 12; z < worldH - 12; z += 12.5) {
+        if (HORIZONTAL_ROADS.some((ry) => Math.abs(z - ry * WORLD_SCALE) < roadW * 0.5 + 4.5)) continue;
+        for (const offset of laneOffsets) {
+          dashTransforms.push({ x: x + offset, z, rotation: 0 });
+        }
+      }
+    }
+
+    for (const ry of HORIZONTAL_ROADS) {
+      const bridgeRow = BRIDGE_YS.includes(ry);
+      const spans: [number, number][] = bridgeRow
+        ? [[0, WORLD_W * WORLD_SCALE]]
+        : [[0, portoBankX], [gaiaStartX, WORLD_W * WORLD_SCALE]];
+      const z = ry * WORLD_SCALE;
+      for (const [start, end] of spans) {
+        for (let x = start + 12; x < end - 12; x += 12.5) {
+          if (VERTICAL_ROADS.some((rx) => Math.abs(x - rx * WORLD_SCALE) < roadW * 0.5 + 4.5)) continue;
+          for (const offset of laneOffsets) {
+            dashTransforms.push({ x, z: z + offset, rotation: Math.PI / 2 });
+          }
+        }
+      }
+    }
+
+    const laneDashes = new THREE.InstancedMesh(dashGeometry, lanePaint, dashTransforms.length);
+    dashTransforms.forEach((dash, index) => {
+      _v1.set(dash.x, 0.119, dash.z);
+      _euler.set(0, dash.rotation, 0);
+      _quat.setFromEuler(_euler);
+      _scale.set(1, 1, 1);
+      _mat4.compose(_v1, _quat, _scale);
+      laneDashes.setMatrixAt(index, _mat4);
+    });
+    laneDashes.instanceMatrix.needsUpdate = true;
+    laneDashes.computeBoundingSphere();
+    this.scene.add(laneDashes);
+    this.disposables.push(dashGeometry, lanePaint);
+
+    // Recessed cast-iron inspection covers, placed away from junctions.
+    const manholeGeometry = new THREE.CylinderGeometry(0.34, 0.34, 0.035, 20);
+    const manholeMaterial = new THREE.MeshStandardMaterial({
+      color: 0x555b60,
+      roughness: 0.62,
+      metalness: 0.72,
+    });
+    const manholePositions: { x: number; z: number }[] = [];
+    for (const rx of VERTICAL_ROADS) {
+      for (let z = 24; z < worldH - 16; z += 58) {
+        if (HORIZONTAL_ROADS.some((ry) => Math.abs(z - ry * WORLD_SCALE) < roadW * 0.5 + 5)) continue;
+        manholePositions.push({ x: rx * WORLD_SCALE - 4.8, z });
+      }
+    }
+    for (const ry of HORIZONTAL_ROADS) {
+      const bridgeRow = BRIDGE_YS.includes(ry);
+      const spans: [number, number][] = bridgeRow
+        ? [[0, WORLD_W * WORLD_SCALE]]
+        : [[0, portoBankX], [gaiaStartX, WORLD_W * WORLD_SCALE]];
+      for (const [start, end] of spans) {
+        for (let x = start + 24; x < end - 16; x += 58) {
+          if (VERTICAL_ROADS.some((rx) => Math.abs(x - rx * WORLD_SCALE) < roadW * 0.5 + 5)) continue;
+          manholePositions.push({ x, z: ry * WORLD_SCALE + 4.8 });
+        }
+      }
+    }
+    const manholes = new THREE.InstancedMesh(manholeGeometry, manholeMaterial, manholePositions.length);
+    manholePositions.forEach((point, index) => {
+      _v1.set(point.x, 0.12, point.z);
+      _quat.identity();
+      _scale.set(1, 1, 1);
+      _mat4.compose(_v1, _quat, _scale);
+      manholes.setMatrixAt(index, _mat4);
+    });
+    manholes.instanceMatrix.needsUpdate = true;
+    manholes.computeBoundingSphere();
+    this.scene.add(manholes);
+    this.disposables.push(manholeGeometry, manholeMaterial);
 
     // 4. Ponte Dom Luís I (y=1520) & Ponte do Infante (y=260) crossing Rio Douro
     const bridgeCenterX = (portoBankX + gaiaStartX) * 0.5;
@@ -575,40 +775,91 @@ export class LeonidaScene3D {
     infante.position.set(bridgeCenterX, 0, 260 * WORLD_SCALE);
     this.scene.add(infante);
 
-    // 5. Intersection patches + European Crosswalks
-    const interGeo = new THREE.PlaneGeometry(roadW * 0.92, roadW * 0.92);
-    interGeo.rotateX(-Math.PI / 2);
-    const interMat = new THREE.MeshStandardMaterial({
-      color: 0x242933,
-      roughness: 0.72,
-      metalness: 0.1,
+    // 5. Raised junction surfaces and four-sided zebra crossings.
+    const intersectionGeometry = new THREE.PlaneGeometry(roadW * 0.94, roadW * 0.94);
+    intersectionGeometry.rotateX(-Math.PI / 2);
+    const intersectionMaterial = new THREE.MeshStandardMaterial({
+      color: 0x292d32,
+      roughness: 0.9,
+      metalness: 0.015,
     });
-    const stripeGeo = new THREE.PlaneGeometry(2.2, 0.55);
-    stripeGeo.rotateX(-Math.PI / 2);
-    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xf1f5f9, transparent: true, opacity: 0.85 });
+
+    const verticalZebraGeometry = new THREE.PlaneGeometry(roadW - 2.2, 0.54);
+    verticalZebraGeometry.rotateX(-Math.PI / 2);
+    const horizontalZebraGeometry = new THREE.PlaneGeometry(0.54, roadW - 2.2);
+    horizontalZebraGeometry.rotateX(-Math.PI / 2);
+    const zebraMaterial = new THREE.MeshBasicMaterial({
+      color: 0xe8e6de,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    });
+    const verticalZebras: { x: number; z: number }[] = [];
+    const horizontalZebras: { x: number; z: number }[] = [];
 
     for (const rx of VERTICAL_ROADS) {
       for (const ry of HORIZONTAL_ROADS) {
         const ix = rx * WORLD_SCALE;
         const iz = ry * WORLD_SCALE;
-        const patch = new THREE.Mesh(interGeo, interMat);
-        patch.position.set(ix, 0.1, iz);
+        const patch = new THREE.Mesh(intersectionGeometry, intersectionMaterial);
+        patch.position.set(ix, 0.102, iz);
         patch.receiveShadow = !this.isSoftwareGl;
         this.scene.add(patch);
 
-        for (let s = -5; s <= 5; s += 2) {
-          const stN = new THREE.Mesh(stripeGeo, stripeMat);
-          stN.rotation.y = Math.PI / 2;
-          stN.position.set(ix + s * 1.15, 0.105, iz - roadW * 0.48);
-          this.scene.add(stN);
-
-          const stW = new THREE.Mesh(stripeGeo, stripeMat);
-          stW.position.set(ix - roadW * 0.48, 0.105, iz + s * 1.15);
-          this.scene.add(stW);
+        for (const side of [-1, 1]) {
+          for (let stripe = -4; stripe <= 4; stripe += 1) {
+            verticalZebras.push({
+              x: ix,
+              z: iz + side * (roadW * 0.5 + 1.3) + stripe * 0.82,
+            });
+            horizontalZebras.push({
+              x: ix + side * (roadW * 0.5 + 1.3) + stripe * 0.82,
+              z: iz,
+            });
+          }
         }
       }
     }
-    this.disposables.push(interGeo, interMat, stripeGeo, stripeMat);
+
+    const verticalCrosswalks = new THREE.InstancedMesh(
+      verticalZebraGeometry,
+      zebraMaterial,
+      verticalZebras.length,
+    );
+    verticalZebras.forEach((point, index) => {
+      _v1.set(point.x, 0.126, point.z);
+      _quat.identity();
+      _scale.set(1, 1, 1);
+      _mat4.compose(_v1, _quat, _scale);
+      verticalCrosswalks.setMatrixAt(index, _mat4);
+    });
+
+    const horizontalCrosswalks = new THREE.InstancedMesh(
+      horizontalZebraGeometry,
+      zebraMaterial,
+      horizontalZebras.length,
+    );
+    horizontalZebras.forEach((point, index) => {
+      _v1.set(point.x, 0.126, point.z);
+      _quat.identity();
+      _scale.set(1, 1, 1);
+      _mat4.compose(_v1, _quat, _scale);
+      horizontalCrosswalks.setMatrixAt(index, _mat4);
+    });
+
+    verticalCrosswalks.instanceMatrix.needsUpdate = true;
+    horizontalCrosswalks.instanceMatrix.needsUpdate = true;
+    verticalCrosswalks.computeBoundingSphere();
+    horizontalCrosswalks.computeBoundingSphere();
+    this.scene.add(verticalCrosswalks, horizontalCrosswalks);
+    this.disposables.push(
+      intersectionGeometry,
+      intersectionMaterial,
+      verticalZebraGeometry,
+      horizontalZebraGeometry,
+      zebraMaterial,
+    );
+
   }
 
   private buildBuildings(anisotropy: number) {
@@ -669,18 +920,29 @@ export class LeonidaScene3D {
     const planeTrees = CITY_TREES.filter((t) => t.variant === 'plane');
     const cypressTrees = CITY_TREES.filter((t) => t.variant === 'cypress');
 
-    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.28, 3.8, 8);
+    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.28, 3.8, 12);
     trunkGeo.translate(0, 1.9, 0);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 });
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, CITY_TREES.length);
     trunks.castShadow = !this.isSoftwareGl;
 
-    const planeCrownGeo = new THREE.IcosahedronGeometry(2.05, 1);
+    const planeCrownGeo = new THREE.SphereGeometry(2.05, 20, 14);
+    const crownPositions = planeCrownGeo.attributes.position;
+    for (let vertex = 0; vertex < crownPositions.count; vertex += 1) {
+      const x = crownPositions.getX(vertex);
+      const y = crownPositions.getY(vertex);
+      const z = crownPositions.getZ(vertex);
+      const organic = 1
+        + 0.035 * Math.sin(x * 2.7 + z * 1.9) * Math.cos(y * 2.4 - x * 1.3)
+        + 0.018 * Math.sin(y * 5.2 + z * 3.6);
+      crownPositions.setXYZ(vertex, x * organic, y * organic, z * organic);
+    }
+    planeCrownGeo.computeVertexNormals();
     const leafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.78 });
-    const planeCrowns = new THREE.InstancedMesh(planeCrownGeo, leafMat, planeTrees.length);
+    const planeCrowns = new THREE.InstancedMesh(planeCrownGeo, leafMat, planeTrees.length * 3);
     planeCrowns.castShadow = !this.isSoftwareGl;
 
-    const cypGeo = new THREE.ConeGeometry(1.15, 5.4, 8);
+    const cypGeo = new THREE.ConeGeometry(1.15, 5.4, 16, 5);
     cypGeo.translate(0, 2.7, 0);
     const cypCrowns = new THREE.InstancedMesh(cypGeo, leafMat, cypressTrees.length);
     cypCrowns.castShadow = !this.isSoftwareGl;
@@ -700,13 +962,23 @@ export class LeonidaScene3D {
       trunks.setMatrixAt(idx, _mat4);
 
       if (t.variant === 'plane') {
-        _v1.set(tx, 4.4 * s, tz);
-        _scale.set(s * 1.05, s * 0.88, s * 1.05);
-        _mat4.compose(_v1, _quat, _scale);
-        planeCrowns.setMatrixAt(pIdx, _mat4);
-        _col.setHex(pIdx % 2 === 0 ? 0x2f855a : 0x3f8f4e);
-        planeCrowns.setColorAt(pIdx, _col);
-        pIdx += 1;
+        // Three overlapping, organically shaped canopy clusters create a fuller plane tree.
+        const canopyParts = [
+          { x: 0, y: 4.28, z: 0, sx: 1.0, sy: 0.82, sz: 1.0 },
+          { x: -0.72, y: 4.04, z: 0.16, sx: 0.68, sy: 0.66, sz: 0.72 },
+          { x: 0.7, y: 4.18, z: -0.18, sx: 0.72, sy: 0.68, sz: 0.74 },
+        ];
+        for (let partIndex = 0; partIndex < canopyParts.length; partIndex += 1) {
+          const part = canopyParts[partIndex];
+          _v1.set(tx + part.x * s, part.y * s, tz + part.z * s);
+          _scale.set(s * part.sx, s * part.sy, s * part.sz);
+          _mat4.compose(_v1, _quat, _scale);
+          planeCrowns.setMatrixAt(pIdx, _mat4);
+          const canopyColors = [0x356b48, 0x3f784c, 0x477f50];
+          _col.setHex(canopyColors[(idx + partIndex) % canopyColors.length]);
+          planeCrowns.setColorAt(pIdx, _col);
+          pIdx += 1;
+        }
       } else {
         _v1.set(tx, 1.5 * s, tz);
         _scale.set(s, s, s);
@@ -751,7 +1023,7 @@ export class LeonidaScene3D {
     this.lampBulbMat = new THREE.MeshStandardMaterial({
       color: 0xfef3c7,
       emissive: 0xfbbf24,
-      emissiveIntensity: 1.5,
+      emissiveIntensity: 0.7,
       roughness: 0.2,
     });
     const bulbs = new THREE.InstancedMesh(bulbGeo, this.lampBulbMat, lampCoords.length);
@@ -780,12 +1052,12 @@ export class LeonidaScene3D {
     this.trafficGreenMat = new THREE.MeshStandardMaterial({
       color: 0x10b981,
       emissive: 0x10b981,
-      emissiveIntensity: 1.8,
+      emissiveIntensity: 0.95,
     });
     this.trafficRedMat = new THREE.MeshStandardMaterial({
       color: 0xef4444,
       emissive: 0xef4444,
-      emissiveIntensity: 1.8,
+      emissiveIntensity: 0.95,
     });
     const tlPoleGeo = new THREE.CylinderGeometry(0.08, 0.1, 4.4, 6);
     tlPoleGeo.translate(0, 2.2, 0);
@@ -1007,7 +1279,7 @@ export class LeonidaScene3D {
     this.gpsArrowMat = new THREE.MeshStandardMaterial({
       color: 0xf59e0b,
       emissive: 0xf59e0b,
-      emissiveIntensity: 1.5,
+      emissiveIntensity: 0.7,
       roughness: 0.25,
       metalness: 0.5,
     });
@@ -1024,6 +1296,287 @@ export class LeonidaScene3D {
     );
   }
 
+  private buildLifeLocationMarkers() {
+    for (const location of LIFE_LOCATIONS) {
+      const group = new THREE.Group();
+      const markerColor = new THREE.Color(location.markerColor);
+
+      const ringGeo = new THREE.RingGeometry(1.45, 1.9, 36);
+      ringGeo.rotateX(-Math.PI / 2);
+      const ringMaterial = new THREE.MeshBasicMaterial({
+        color: markerColor,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.66,
+        depthWrite: false,
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMaterial);
+      ring.position.y = 0.15;
+      group.add(ring);
+
+      const baseGeo = new THREE.CylinderGeometry(0.34, 0.46, 0.24, 12);
+      const baseMat = new THREE.MeshStandardMaterial({
+        color: 0x172033,
+        metalness: 0.72,
+        roughness: 0.32,
+      });
+      const base = new THREE.Mesh(baseGeo, baseMat);
+      base.position.y = 0.23;
+      group.add(base);
+
+      const postGeo = new THREE.CylinderGeometry(0.07, 0.1, 1.3, 8);
+      const postMat = new THREE.MeshStandardMaterial({
+        color: markerColor,
+        emissive: markerColor,
+        emissiveIntensity: 0.32,
+        metalness: 0.45,
+        roughness: 0.34,
+      });
+      const post = new THREE.Mesh(postGeo, postMat);
+      post.position.y = 0.98;
+      group.add(post);
+
+      const orbGeo = new THREE.SphereGeometry(0.42, 16, 12);
+      const orbMat = new THREE.MeshStandardMaterial({
+        color: markerColor,
+        emissive: markerColor,
+        emissiveIntensity: 1.25,
+        roughness: 0.2,
+        metalness: 0.12,
+      });
+      const orb = new THREE.Mesh(orbGeo, orbMat);
+      orb.position.y = 1.78;
+      group.add(orb);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'rgba(8, 13, 24, 0.88)';
+        ctx.beginPath();
+        ctx.moveTo(30, 8);
+        ctx.lineTo(482, 8);
+        ctx.arcTo(504, 8, 504, 30, 22);
+        ctx.lineTo(504, 98);
+        ctx.arcTo(504, 120, 482, 120, 22);
+        ctx.lineTo(30, 120);
+        ctx.arcTo(8, 120, 8, 98, 22);
+        ctx.lineTo(8, 30);
+        ctx.arcTo(8, 8, 30, 8, 22);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = location.markerColor;
+        ctx.lineWidth = 5;
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '600 42px Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${location.icon}  ${location.label.toUpperCase()}`, 256, 66, 462);
+      }
+      const labelTexture = new THREE.CanvasTexture(canvas);
+      labelTexture.colorSpace = THREE.SRGBColorSpace;
+      const labelMaterial = new THREE.SpriteMaterial({
+        map: labelTexture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+      });
+      const label = new THREE.Sprite(labelMaterial);
+      label.position.set(0, 3.35, 0);
+      label.scale.set(5.2, 1.3, 1);
+      group.add(label);
+
+      group.position.set(location.x * WORLD_SCALE, 0, location.y * WORLD_SCALE);
+      this.scene.add(group);
+      this.lifeLocationMarkers.set(location.id, { group, ring, ringMaterial, orb });
+
+      this.disposables.push(
+        ringGeo,
+        ringMaterial,
+        baseGeo,
+        baseMat,
+        postGeo,
+        postMat,
+        orbGeo,
+        orbMat,
+        labelTexture,
+        labelMaterial,
+      );
+    }
+  }
+
+  private buildLifeLocationNpcs() {
+    for (const location of LIFE_LOCATIONS) {
+      const rig = createCharacterRig(
+        false,
+        location.npcShirtColor,
+        this.shadowTex,
+        !this.isSoftwareGl,
+        'pistol',
+        location.npcName,
+        location.npcColor,
+      );
+      const initialRoutine = getOutdoorNpcSchedule(location.kind, 450);
+      rig.group.position.set((location.x + initialRoutine.x) * WORLD_SCALE, 0, (location.y + initialRoutine.y) * WORLD_SCALE);
+      this.lifeLocationNpcs.set(location.id, rig);
+      this.scene.add(rig.group);
+    }
+  }
+
+  private syncLifeLocationMarkers(engine: LeonidaEngine, nowSec: number) {
+    for (const location of LIFE_LOCATIONS) {
+      const marker = this.lifeLocationMarkers.get(location.id);
+      if (!marker) continue;
+      const distance = Math.hypot(
+        engine.player.x - location.x,
+        engine.player.y - location.y,
+      );
+      const active = distance <= location.radius;
+      const pulse = 1 + Math.sin(nowSec * 3.2) * 0.08;
+      marker.ring.scale.setScalar(active ? pulse * 1.18 : pulse);
+      marker.ringMaterial.opacity = active ? 0.96 : 0.58;
+      marker.orb.scale.setScalar(active ? 1.22 : 1);
+    }
+  }
+
+  private syncLifeLocationNpcs(engine: LeonidaEngine, nowSec: number, dt: number) {
+    const safeDt = Math.min(Math.max(dt, 0), 0.05);
+    LIFE_LOCATIONS.forEach((location, index) => {
+      const rig = this.lifeLocationNpcs.get(location.id);
+      if (!rig) return;
+      const routine = getOutdoorNpcSchedule(location.kind, engine.life.minuteOfDay);
+      const targetX = (location.x + routine.x) * WORLD_SCALE;
+      const targetZ = (location.y + routine.y) * WORLD_SCALE;
+      const dx = targetX - rig.group.position.x;
+      const dz = targetZ - rig.group.position.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance > 0.035) {
+        const travel = Math.min(distance, safeDt * 0.72);
+        rig.group.position.x += (dx / distance) * travel;
+        rig.group.position.z += (dz / distance) * travel;
+        rig.group.rotation.y = Math.atan2(dx, dz);
+      } else {
+        const faceX = engine.player.x * WORLD_SCALE - rig.group.position.x;
+        const faceZ = engine.player.y * WORLD_SCALE - rig.group.position.z;
+        rig.group.rotation.y = Math.atan2(faceX, faceZ);
+      }
+      animateCharacterRig(rig, distance > 0.035 ? 22 : 0, false, false, nowSec, index * 1.65);
+    });
+  }
+
+  private async loadRealisticPlayerModel(character: CharacterId) {
+    const loadToken = ++this.realisticPlayerLoadToken;
+    const previous = this.realisticPlayer;
+    if (previous) {
+      previous.mixer.stopAllAction();
+      this.scene.remove(previous.group);
+      this.realisticPlayer = null;
+    }
+    this.playerRig.group.visible = true;
+
+    const modelPath =
+      character === 'lucia'
+        ? '/models/characters/lucia-locomotion.glb'
+        : '/models/characters/jason-locomotion.glb';
+
+    try {
+      const gltf = await this.assetLoader.loadAsync(modelPath);
+      if (loadToken !== this.realisticPlayerLoadToken) return;
+
+      const model = gltf.scene;
+      model.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (mesh.isMesh) {
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.frustumCulled = true;
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const material of materials) {
+            material.side = THREE.FrontSide;
+          }
+        }
+      });
+
+      // The supplied human assets are authored at real-world scale.
+      const bounds = new THREE.Box3().setFromObject(model);
+      const modelHeight = bounds.getSize(new THREE.Vector3()).y;
+      if (modelHeight > 0.01) {
+        const scale = 1.76 / modelHeight;
+        model.scale.setScalar(scale);
+        model.position.y = -bounds.min.y * scale;
+      }
+
+      // The game world uses +X as the character's forward direction.
+      model.rotation.y = Math.PI / 2;
+
+      const group = new THREE.Group();
+      group.add(model);
+      this.scene.add(group);
+
+      const mixer = new THREE.AnimationMixer(model);
+      const actions = new Map<'idle' | 'walk' | 'jog' | 'run', THREE.AnimationAction>();
+      for (const clip of gltf.animations) {
+        const name = clip.name.toLowerCase().replace(/[_-]+/g, ' ');
+        let key: 'idle' | 'walk' | 'jog' | 'run' | null = null;
+        if (name.includes('idle')) key = 'idle';
+        else if (name.includes('run') || name.includes('sprint')) key = 'run';
+        else if (name.includes('jog')) key = 'jog';
+        else if (name.includes('walk') || name.includes('locomotion')) key = 'walk';
+
+        if (key && !actions.has(key)) {
+          const action = mixer.clipAction(clip);
+          action.enabled = true;
+          action.setEffectiveTimeScale(1);
+          actions.set(key, action);
+        }
+      }
+
+      // Always provide an idle fallback, then a walk fallback if the pack has fewer clips.
+      const firstAction = actions.values().next().value as THREE.AnimationAction | undefined;
+      if (!actions.has('idle') && firstAction) actions.set('idle', firstAction);
+      if (!actions.has('walk') && firstAction) actions.set('walk', firstAction);
+      if (actions.has('idle')) actions.get('idle')?.play();
+
+      this.realisticPlayer = {
+        group,
+        mixer,
+        actions,
+        activeAction: actions.get('idle') ?? firstAction ?? null,
+      };
+      this.playerRig.group.visible = false;
+      console.info('[PORTUGAL LIFE] Modelo humano realista carregado:', modelPath, gltf.animations.map((clip) => clip.name));
+    } catch (error) {
+      if (loadToken === this.realisticPlayerLoadToken) {
+        this.playerRig.group.visible = true;
+        console.warn('[PORTUGAL LIFE] Modelo humano externo indisponível; a usar o modelo de reserva.', error);
+      }
+    }
+  }
+
+  private updateRealisticPlayerAnimation(speed: number, deltaSeconds: number) {
+    const player = this.realisticPlayer;
+    if (!player) return;
+
+    const requested: 'idle' | 'walk' | 'jog' | 'run' =
+      speed < 0.2 ? 'idle' : speed > 7 ? 'run' : speed > 4 ? 'jog' : 'walk';
+    const nextAction =
+      player.actions.get(requested) ??
+      player.actions.get(requested === 'run' || requested === 'jog' ? 'walk' : 'idle') ??
+      player.actions.values().next().value;
+
+    if (nextAction && nextAction !== player.activeAction) {
+      nextAction.reset();
+      nextAction.fadeIn(0.22).play();
+      player.activeAction?.fadeOut(0.22);
+      player.activeAction = nextAction;
+    }
+
+    player.mixer.update(deltaSeconds);
+  }
+
   public syncCharacterModel(character: CharacterId, profession: ProfessionId = 'taxi') {
     if (this.playerCharacter !== character) {
       this.playerCharacter = character;
@@ -1037,6 +1590,7 @@ export class LeonidaScene3D {
         prevWeapon,
       );
       this.scene.add(this.playerRig.group);
+      void this.loadRealisticPlayerModel(character);
     }
     this.playerRig.jacketMat.color.set(PROFESSIONS[profession].uniformHex);
   }
@@ -1114,8 +1668,10 @@ export class LeonidaScene3D {
 
     this.updateAtmosphere(engine.dayTime);
     this.syncVehicles(engine, dt);
-    this.syncPlayer(engine, nowSec);
+    this.syncPlayer(engine, nowSec, dt);
     this.syncPedestrians(engine, nowSec);
+    this.syncLifeLocationMarkers(engine, nowSec);
+    this.syncLifeLocationNpcs(engine, nowSec, dt);
     this.syncGuards(engine, nowSec);
     this.syncRemotePlayers(remotePlayers, dt, nowSec);
     this.syncPickups(engine, nowSec);
@@ -1222,13 +1778,18 @@ export class LeonidaScene3D {
         playerDrivenVeh = v;
       }
 
-      rig.paintMat.color.set(v.color);
+      if (rig.paintMaterials?.length) {
+        for (const material of rig.paintMaterials) material.color.set(v.color);
+      } else {
+        rig.paintMat.color.set(v.color);
+      }
       rig.group.position.set(v.x * WORLD_SCALE, 0, v.y * WORLD_SCALE);
       rig.group.rotation.y = -v.angle;
 
       const spinDelta = -(v.speed * WORLD_SCALE * dt) / 0.38;
       for (const w of rig.wheelRollers) {
-        w.rotation.z += spinDelta;
+        if (rig.wheelAxis === 'x') w.rotation.x += spinDelta;
+        else w.rotation.z += spinDelta;
       }
 
       const targetSteer = v.id === engine.player.vehicleId ? clampSteerVisual(v) : 0;
@@ -1285,11 +1846,27 @@ export class LeonidaScene3D {
     }
   }
 
-  private syncPlayer(engine: LeonidaEngine, nowSec: number) {
+  private syncPlayer(engine: LeonidaEngine, nowSec: number, deltaSeconds: number) {
     if (engine.player.vehicleId) {
       this.playerRig.group.visible = false;
+      if (this.realisticPlayer) this.realisticPlayer.group.visible = false;
       return;
     }
+
+    const speed = Math.hypot(engine.player.vx, engine.player.vy);
+    if (this.realisticPlayer) {
+      this.playerRig.group.visible = false;
+      this.realisticPlayer.group.visible = true;
+      this.realisticPlayer.group.position.set(
+        engine.player.x * WORLD_SCALE,
+        0,
+        engine.player.y * WORLD_SCALE,
+      );
+      this.realisticPlayer.group.rotation.y = -engine.player.angle;
+      this.updateRealisticPlayerAnimation(speed, deltaSeconds);
+      return;
+    }
+
     this.playerRig.group.visible = true;
     this.playerRig.jacketMat.color.set(PROFESSIONS[engine.player.profession].uniformHex);
     setCharacterRigWeapon(this.playerRig, engine.player.currentWeapon);
@@ -1299,9 +1876,7 @@ export class LeonidaScene3D {
       engine.player.y * WORLD_SCALE,
     );
     this.playerRig.group.rotation.y = -engine.player.angle;
-
-    const spd = Math.hypot(engine.player.vx, engine.player.vy);
-    animateCharacterRig(this.playerRig, spd, true, false, nowSec, 0);
+    animateCharacterRig(this.playerRig, speed, true, false, nowSec, 0);
   }
 
   private syncPedestrians(engine: LeonidaEngine, nowSec: number) {
@@ -1708,6 +2283,12 @@ export class LeonidaScene3D {
 
   public dispose() {
     this.stopLoop();
+    this.realisticPlayerLoadToken += 1;
+    if (this.realisticPlayer) {
+      this.realisticPlayer.mixer.stopAllAction();
+      this.scene.remove(this.realisticPlayer.group);
+      this.realisticPlayer = null;
+    }
     this.renderer.domElement.removeEventListener('webglcontextlost', this.handleContextLost);
     this.renderer.domElement.removeEventListener('webglcontextrestored', this.handleContextRestored);
 
@@ -1751,89 +2332,287 @@ export function drawMinimapCanvas(
   height: number,
 ) {
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = '#111827';
-  ctx.fillRect(0, 0, width, height);
 
   const sx = width / WORLD_W;
   const sy = height / WORLD_H;
+  const roadPxX = ROAD_WIDTH * sx;
+  const roadPxY = ROAD_WIDTH * sy;
+  const landGradient = ctx.createLinearGradient(0, 0, width, height);
+  landGradient.addColorStop(0, '#d7d1c4');
+  landGradient.addColorStop(1, '#c9c3b6');
+  ctx.fillStyle = landGradient;
+  ctx.fillRect(0, 0, width, height);
 
-  // Rio Douro channel
-  ctx.fillStyle = '#0c5468';
-  ctx.fillRect(RIVER_START_X * sx, 0, (RIVER_END_X - RIVER_START_X) * sx, height);
+  // Quiet city-block parcel texture.
+  ctx.save();
+  ctx.strokeStyle = 'rgba(91, 87, 78, 0.07)';
+  ctx.lineWidth = 0.45;
+  for (let x = 18; x < WORLD_W; x += 96) {
+    ctx.beginPath();
+    ctx.moveTo(x * sx, 0);
+    ctx.lineTo(x * sx, height);
+    ctx.stroke();
+  }
+  for (let y = 26; y < WORLD_H; y += 88) {
+    ctx.beginPath();
+    ctx.moveTo(0, y * sy);
+    ctx.lineTo(width, y * sy);
+    ctx.stroke();
+  }
+  ctx.restore();
 
-  // Porto & Gaia granite avenues
-  ctx.fillStyle = '#374151';
+  const drawRoadSegment = (x1: number, y1: number, x2: number, y2: number) => {
+    ctx.lineCap = 'butt';
+    ctx.strokeStyle = '#aaa59b';
+    ctx.lineWidth = Math.max(2, Math.max(roadPxX, roadPxY) + 2.4);
+    ctx.beginPath();
+    ctx.moveTo(x1 * sx, y1 * sy);
+    ctx.lineTo(x2 * sx, y2 * sy);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#414649';
+    ctx.lineWidth = Math.max(1.5, Math.max(roadPxX, roadPxY));
+    ctx.beginPath();
+    ctx.moveTo(x1 * sx, y1 * sy);
+    ctx.lineTo(x2 * sx, y2 * sy);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(238, 235, 225, 0.68)';
+    ctx.lineWidth = 0.45;
+    ctx.setLineDash([2.2, 2.5]);
+    ctx.beginPath();
+    ctx.moveTo(x1 * sx, y1 * sy);
+    ctx.lineTo(x2 * sx, y2 * sy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
+
+  // Arterial roads with stone kerbs and asphalt centres.
   for (const rx of VERTICAL_ROADS) {
-    ctx.fillRect((rx - ROAD_WIDTH / 2) * sx, 0, ROAD_WIDTH * sx, height);
+    drawRoadSegment(rx, 0, rx, WORLD_H);
   }
   for (const ry of HORIZONTAL_ROADS) {
-    const isBridge = BRIDGE_YS.includes(ry);
-    if (isBridge) {
-      ctx.fillRect(0, (ry - ROAD_WIDTH / 2) * sy, width, ROAD_WIDTH * sy);
+    if (BRIDGE_YS.includes(ry)) {
+      drawRoadSegment(0, ry, WORLD_W, ry);
     } else {
-      ctx.fillRect(0, (ry - ROAD_WIDTH / 2) * sy, RIVER_START_X * sx, ROAD_WIDTH * sy);
-      ctx.fillRect(RIVER_END_X * sx, (ry - ROAD_WIDTH / 2) * sy, (WORLD_W - RIVER_END_X) * sx, ROAD_WIDTH * sy);
+      drawRoadSegment(0, ry, RIVER_START_X, ry);
+      drawRoadSegment(RIVER_END_X, ry, WORLD_W, ry);
     }
   }
 
-  // Real Porto Landmarks
-  ctx.fillStyle = '#64748b';
-  for (const b of BUILDINGS) {
-    ctx.fillRect(b.x * sx, b.y * sy, b.w * sx, b.h * sy);
+  // Douro water overlays ordinary roads; the two bridge decks remain visible on top.
+  const riverGradient = ctx.createLinearGradient(RIVER_START_X * sx, 0, RIVER_END_X * sx, height);
+  riverGradient.addColorStop(0, '#2b7080');
+  riverGradient.addColorStop(0.48, '#1d596d');
+  riverGradient.addColorStop(1, '#16495d');
+  ctx.fillStyle = riverGradient;
+  ctx.fillRect(RIVER_START_X * sx, 0, (RIVER_END_X - RIVER_START_X) * sx, height);
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(211, 231, 231, 0.16)';
+  ctx.lineWidth = 0.55;
+  for (let y = 14; y < height; y += 13) {
+    ctx.beginPath();
+    ctx.moveTo(RIVER_START_X * sx + 2, y);
+    ctx.bezierCurveTo(
+      RIVER_START_X * sx + 14,
+      y - 2,
+      RIVER_END_X * sx - 12,
+      y + 2,
+      RIVER_END_X * sx - 2,
+      y,
+    );
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Bridge decks and their parapets.
+  for (const bridgeY of BRIDGE_YS) {
+    const py = bridgeY * sy;
+    ctx.fillStyle = '#77766f';
+    ctx.fillRect(0, py - roadPxY * 0.62, width, roadPxY * 1.24);
+    ctx.fillStyle = '#45494a';
+    ctx.fillRect(0, py - roadPxY * 0.48, width, roadPxY * 0.96);
+    ctx.strokeStyle = 'rgba(235, 231, 220, 0.8)';
+    ctx.lineWidth = 0.55;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(0, py);
+    ctx.lineTo(width, py);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
-  for (const z of SERVICE_ZONES) {
-    ctx.fillStyle = z.id === 'pay-n-spray' ? '#06b6d4' : '#f59e0b';
+  // Cordoaria gardens and tree canopies.
+  ctx.fillStyle = '#658267';
+  ctx.beginPath();
+  ctx.ellipse(855 * sx, 1160 * sy, 105 * sx, 118 * sy, -0.12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(196, 207, 165, 0.54)';
+  ctx.beginPath();
+  ctx.ellipse(855 * sx, 1160 * sy, 72 * sx, 84 * sy, -0.12, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Zebra crossings on all approaches to the main junctions.
+  ctx.fillStyle = 'rgba(241, 239, 230, 0.88)';
+  for (const rx of VERTICAL_ROADS) {
+    for (const ry of HORIZONTAL_ROADS) {
+      for (const side of [-1, 1]) {
+        for (let stripe = -3; stripe <= 3; stripe += 1) {
+          const z = ry + side * (ROAD_WIDTH / 2 + 12) + stripe * 1.35;
+          ctx.fillRect(
+            (rx - ROAD_WIDTH / 2 + 9) * sx,
+            z * sy,
+            (ROAD_WIDTH - 18) * sx,
+            Math.max(0.35, 0.75 * sy),
+          );
+
+          const x = rx + side * (ROAD_WIDTH / 2 + 12) + stripe * 1.35;
+          ctx.fillRect(
+            x * sx,
+            (ry - ROAD_WIDTH / 2 + 9) * sy,
+            Math.max(0.35, 0.75 * sx),
+            (ROAD_WIDTH - 18) * sy,
+          );
+        }
+      }
+    }
+  }
+
+  // Landmark footprints with stone-coloured roofs and subtle building shadows.
+  const roofPalette = ['#9d9689', '#b58a62', '#777d80', '#b7aa91', '#8e8172'];
+  for (let i = 0; i < BUILDINGS.length; i += 1) {
+    const b = BUILDINGS[i];
+    const x = b.x * sx;
+    const y = b.y * sy;
+    const w = Math.max(2, b.w * sx);
+    const h = Math.max(2, b.h * sy);
+
+    ctx.fillStyle = 'rgba(39, 43, 42, 0.2)';
+    ctx.fillRect(x + 1, y + 1, w, h);
+    ctx.fillStyle = roofPalette[i % roofPalette.length];
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(57, 57, 52, 0.74)';
+    ctx.lineWidth = 0.65;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.fillStyle = 'rgba(229, 224, 211, 0.5)';
+    ctx.fillRect(x + w * 0.12, y + h * 0.12, w * 0.76, Math.max(0.45, h * 0.1));
+    ctx.fillStyle = 'rgba(38, 48, 52, 0.28)';
+    for (let window = 0; window < 3; window += 1) {
+      ctx.fillRect(x + w * (0.18 + window * 0.28), y + h * 0.34, Math.max(0.35, w * 0.1), Math.max(0.35, h * 0.1));
+    }
+  }
+
+  // Compact district labels and river name.
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '700 ' + Math.max(6, Math.min(10, width / 24)) + 'px sans-serif';
+  ctx.fillStyle = 'rgba(55, 58, 53, 0.78)';
+  ctx.fillText('PORTO', 1220 * sx, 2050 * sy);
+  ctx.fillText('GAIA', 3000 * sx, 2070 * sy);
+  ctx.save();
+  ctx.translate((RIVER_START_X + RIVER_END_X) * 0.5 * sx, height * 0.5);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = 'rgba(220, 237, 236, 0.75)';
+  ctx.font = '600 ' + Math.max(5, Math.min(8, width / 30)) + 'px sans-serif';
+  ctx.fillText('RIO DOURO', 0, 0);
+  ctx.restore();
+  ctx.restore();
+
+  // Service points and playable locations.
+  for (const location of LIFE_LOCATIONS) {
+    ctx.fillStyle = location.markerColor;
+    ctx.strokeStyle = 'rgba(31, 41, 46, 0.78)';
+    ctx.lineWidth = 0.6;
     ctx.beginPath();
-    ctx.arc(z.x * sx, z.y * sy, 3.8, 0, Math.PI * 2);
+    ctx.arc(location.x * sx, location.y * sy, 2.25, 0, Math.PI * 2);
     ctx.fill();
-  }
-
-  // Live Multiplayer Players colored by profession
-  for (const rp of remotePlayers.values()) {
-    const profCol = PROFESSIONS[rp.profession]?.colorHex ?? '#10b981';
-    ctx.fillStyle = profCol;
-    ctx.beginPath();
-    ctx.arc(rp.x * sx, rp.y * sy, 3.6, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // 112 / Speed Radar Emergency Pings
-  for (const em of engine.emergencyPings) {
-    ctx.strokeStyle = em.kind === '112' ? '#f43f5e' : '#38bdf8';
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.arc(em.x * sx, em.y * sy, 5.0, 0, Math.PI * 2);
     ctx.stroke();
   }
 
-  // GPS Dashed Route to Active Objective
+  for (const z of SERVICE_ZONES) {
+    ctx.fillStyle = z.id === 'pay-n-spray' ? '#0891b2' : '#d97706';
+    ctx.beginPath();
+    ctx.arc(z.x * sx, z.y * sy, 2.7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Live multiplayer players coloured by profession.
+  for (const rp of remotePlayers.values()) {
+    const profCol = PROFESSIONS[rp.profession]?.colorHex ?? '#10b981';
+    ctx.fillStyle = profCol;
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.lineWidth = 0.65;
+    ctx.beginPath();
+    ctx.arc(rp.x * sx, rp.y * sy, 2.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // 112 / speed radar emergency pings.
+  for (const em of engine.emergencyPings) {
+    ctx.strokeStyle = em.kind === '112' ? '#e11d48' : '#0284c7';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(em.x * sx, em.y * sy, 4.2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // GPS route to the active objective.
   ctx.save();
-  ctx.strokeStyle = engine.mission.stage === 'deliver' ? '#38bdf8' : '#f59e0b';
-  ctx.lineWidth = 1.6;
-  ctx.setLineDash([4, 3]);
+  ctx.strokeStyle = engine.mission.stage === 'deliver' ? '#0ea5e9' : '#d97706';
+  ctx.lineWidth = 1.35;
+  ctx.setLineDash([3.2, 2.2]);
   ctx.beginPath();
   ctx.moveTo(engine.player.x * sx, engine.player.y * sy);
   ctx.lineTo(engine.mission.targetX * sx, engine.mission.targetY * sy);
   ctx.stroke();
   ctx.restore();
 
-  // Active Real-Building Simulation Marker
-  ctx.fillStyle = engine.mission.stage === 'simulate_interior' ? '#10b981' : '#f59e0b';
+  // Active objective.
+  ctx.fillStyle = engine.mission.stage === 'simulate_interior' ? '#059669' : '#f59e0b';
   ctx.beginPath();
-  ctx.arc(engine.mission.targetX * sx, engine.mission.targetY * sy, 4.4, 0, Math.PI * 2);
+  ctx.arc(engine.mission.targetX * sx, engine.mission.targetY * sy, 3.7, 0, Math.PI * 2);
   ctx.fill();
 
-  // Local Player Arrow
+  // Player arrow, north marker and map frame.
   ctx.save();
   ctx.translate(engine.player.x * sx, engine.player.y * sy);
   ctx.rotate(engine.player.angle);
   ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#263238';
+  ctx.lineWidth = 0.85;
   ctx.beginPath();
-  ctx.moveTo(5.5, 0);
-  ctx.lineTo(-3.5, -3.5);
-  ctx.lineTo(-3.5, 3.5);
+  ctx.moveTo(5.4, 0);
+  ctx.lineTo(-3.3, -3.1);
+  ctx.lineTo(-2.1, 0);
+  ctx.lineTo(-3.3, 3.1);
   ctx.closePath();
   ctx.fill();
+  ctx.stroke();
   ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(245, 242, 232, 0.92)';
+  ctx.beginPath();
+  ctx.arc(width - 10, 10, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(43, 49, 48, 0.8)';
+  ctx.lineWidth = 0.6;
+  ctx.stroke();
+  ctx.fillStyle = '#303a3c';
+  ctx.font = '700 7px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('N', width - 10, 10);
+  ctx.strokeStyle = '#303a3c';
+  ctx.lineWidth = 0.75;
+  ctx.strokeRect(5, height - 5, Math.max(6, 25 * sx), 1.15);
+  ctx.restore();
+
+  ctx.strokeStyle = 'rgba(33, 39, 40, 0.58)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
 }

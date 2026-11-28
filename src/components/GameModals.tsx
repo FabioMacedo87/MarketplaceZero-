@@ -143,18 +143,18 @@ export const GameModals: React.FC<GameModalsProps> = ({
               <div>
                 <p className="text-xs font-medium text-amber-300 flex items-center gap-2">
                   <Users className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Porto Vida Real 3D · Multiplayer Ao Vivo · Sem Polícia Automática</span>
+                  <span>PORTUGAL LIFE · Simulação de Vida em Mundo Aberto · Porto</span>
                 </p>
                 <h1
                   className="font-display font-bold tracking-tight text-white text-balance leading-[1.05] mt-2"
                   style={{ fontSize: 'clamp(2.3rem, 5vw, 3.8rem)' }}
                 >
-                  PORTO RUSH
+                  PORTUGAL LIFE
                 </h1>
                 <p className="mt-2.5 text-sm sm:text-base text-slate-200 max-w-[58ch] leading-relaxed">
-                  Escolha a sua profissão real no Porto — Motorista TVDE, Estafeta, Empresário,
-                  Paramédico INEM ou Agente da PSP — e viva a cidade com diálogos, minijogos e
-                  patrulhas entre jogadores sem limite de tempo.
+                  Vive o Porto à tua maneira. Trabalha, constrói relações, gere o teu dinheiro,
+                  explora os bairros, conduz e desenvolve o teu próprio percurso. As histórias e
+                  os desafios são opcionais.
                 </p>
               </div>
 
@@ -291,7 +291,7 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-8 py-3.5 text-sm font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-xl transition-colors shadow-lg cursor-pointer"
               >
                 <Play className="w-4 h-4 fill-current" aria-hidden="true" />
-                Entrar Ao Vivo no Porto ({roomCode || 'porto-ribeira'})
+                Começar a tua vida no Porto ({roomCode || 'porto-ribeira'})
               </button>
             </div>
 
@@ -354,7 +354,7 @@ export const GameModals: React.FC<GameModalsProps> = ({
             <div className="flex items-center gap-2">
               <Wrench className="w-5 h-5 text-amber-400" aria-hidden="true" />
               <h2 className="font-display text-xl font-bold text-white">
-                Arsenal, Garagem & Missões do Porto
+                Equipamento, Garagem & Atividades do Porto
               </h2>
             </div>
             <span className="font-mono text-base font-semibold text-emerald-400 tabular-nums">

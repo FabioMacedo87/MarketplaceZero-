@@ -5,6 +5,7 @@ import {
   Camera,
   Compass,
   Hand,
+  Home,
   MessageSquare,
   Pause,
   PhoneCall,
@@ -15,7 +16,7 @@ import {
   VolumeX,
   Wrench,
 } from 'lucide-react';
-import type { ChatMessage, HudSnapshot, WeaponId } from '../game/types.ts';
+import type { ChatMessage, HudSnapshot, LifeLocation, WeaponId } from '../game/types.ts';
 import { WEAPONS, WEAPON_ORDER } from '../game/weapons.ts';
 
 interface GameHudProps {
@@ -30,6 +31,7 @@ interface GameHudProps {
   onToggleMute: () => void;
   onCycleCamera: () => void;
   onOpenCareer: () => void;
+  onOpenLife: (location: LifeLocation | null) => void;
   onOpenGarage: () => void;
   onOpenStory: () => void;
   onOpenRealExplorer: (buildingId?: string | null) => void;
@@ -54,6 +56,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   onToggleMute,
   onCycleCamera,
   onOpenCareer,
+  onOpenLife,
   onOpenGarage,
   onOpenStory,
   onOpenRealExplorer,
@@ -93,7 +96,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 €{hud.cash.toLocaleString('pt-PT')}
               </p>
               <p className="text-[11px] text-slate-400 mt-0.5 tabular-nums truncate">
-                Carta {hud.drivingPoints}/12 · {hud.reputation} Rep
+                Dia {hud.life.day} · {String(Math.floor(hud.life.minuteOfDay / 60)).padStart(2, '0')}:{String(Math.floor(hud.life.minuteOfDay % 60)).padStart(2, '0')} · Carta {hud.drivingPoints}/12
               </p>
             </div>
 
@@ -151,6 +154,16 @@ export const GameHud: React.FC<GameHudProps> = ({
             >
               <Briefcase className="w-3.5 h-3.5 shrink-0" style={{ color: hud.professionColor }} />
               <span className="truncate max-w-[92px] sm:max-w-none">{hud.professionTitle}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onOpenLife(hud.nearLifeLocation)}
+              aria-label="Abrir a simulação de vida quotidiana"
+              className="min-h-[40px] px-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 text-emerald-100 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Home className="w-3.5 h-3.5 shrink-0 text-emerald-300" aria-hidden="true" />
+              <span>Vida</span>
             </button>
 
             <button
@@ -263,6 +276,35 @@ export const GameHud: React.FC<GameHudProps> = ({
           <div className="px-4 py-1.5 rounded-lg bg-[#090D16]/92 border border-white/15 text-xs sm:text-sm font-semibold text-white shadow-lg text-center">
             {hud.toastText}
           </div>
+        )}
+
+        {hud.ambientNpcDialogue && (
+          <div
+            className="max-w-[min(92vw,34rem)] px-4 py-2 rounded-xl bg-slate-950/90 border border-white/15 shadow-xl text-center text-xs sm:text-sm text-slate-100 animate-in fade-in slide-in-from-top-1"
+            style={{ borderLeftWidth: 3, borderLeftColor: hud.ambientNpcDialogue.color }}
+            role="status"
+            aria-live="polite"
+          >
+            <span className="font-bold mr-2" style={{ color: hud.ambientNpcDialogue.color }}>
+              {hud.ambientNpcDialogue.speaker}
+            </span>
+            <span>“{hud.ambientNpcDialogue.text}”</span>
+          </div>
+        )}
+
+        {hud.canInteractLifeLocation && hud.nearLifeLocation && (
+          <button
+            type="button"
+            onClick={() => onOpenLife(hud.nearLifeLocation)}
+            className="pointer-events-auto px-4 py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-bold shadow-lg flex items-center gap-1.5 cursor-pointer"
+          >
+            <Home className="w-4 h-4" aria-hidden="true" />
+            <span>
+              {isMobile
+                ? `Interagir em ${hud.nearLifeLocation.label}`
+                : `[G] Interagir em ${hud.nearLifeLocation.label}`}
+            </span>
+          </button>
         )}
 
         {hud.canInteractMission && (

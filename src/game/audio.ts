@@ -3,6 +3,9 @@ class SoundEngine {
   private muted = false;
   private lastSirenTime = 0;
   private sirenToggle = false;
+  private ambientSource: AudioBufferSourceNode | null = null;
+  private ambientGain: GainNode | null = null;
+  private lastSpokenLine = '';
 
   private ensureContext(): AudioContext | null {
     if (this.muted) return null;
@@ -15,11 +18,59 @@ class SoundEngine {
     if (this.ctx.state === 'suspended') {
       void this.ctx.resume();
     }
+    this.startCityAmbience(this.ctx);
     return this.ctx;
   }
 
   public setMuted(muted: boolean) {
     this.muted = muted;
+    if (muted) {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+      if (this.ambientGain && this.ctx) this.ambientGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.18);
+      return;
+    }
+    const ctx = this.ensureContext();
+    if (ctx && this.ambientGain) this.ambientGain.gain.setTargetAtTime(0.018, ctx.currentTime, 0.8);
+  }
+
+  private startCityAmbience(ctx: AudioContext) {
+    if (this.ambientSource) return;
+    const length = Math.max(1, Math.floor(ctx.sampleRate * 3));
+    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * 0.32;
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 520;
+    filter.Q.value = 0.35;
+    const gain = ctx.createGain();
+    gain.gain.value = this.muted ? 0 : 0.018;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    source.start();
+    this.ambientSource = source;
+    this.ambientGain = gain;
+  }
+
+  public speakNpc(text: string, speaker = 'Morador do Porto') {
+    if (this.muted || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const line = text.trim();
+    if (!line || line === this.lastSpokenLine) return;
+    this.lastSpokenLine = line;
+    const utterance = new SpeechSynthesisUtterance(line);
+    utterance.lang = 'pt-PT';
+    utterance.rate = 0.94;
+    utterance.pitch = speaker.toLowerCase().includes('tiago') || speaker.toLowerCase().includes('rui') ? 0.92 : 1.02;
+    const voices = window.speechSynthesis.getVoices();
+    const voice = voices.find((item) => item.lang.toLowerCase() === 'pt-pt')
+      ?? voices.find((item) => item.lang.toLowerCase().startsWith('pt'));
+    if (voice) utterance.voice = voice;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
   }
 
   public isMuted(): boolean {

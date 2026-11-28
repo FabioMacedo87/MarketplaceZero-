@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { GameHud } from './components/GameHud.tsx';
+import { ActivityModal } from './components/ActivityModal.tsx';
+import { CareerModal } from './components/CareerModal.tsx';
+import { LifeSimulationModal } from './components/LifeSimulationModal.tsx';
+import { InteriorScene } from './components/InteriorScene.tsx';
 import { GameModals } from './components/GameModals.tsx';
 import { MobileControls } from './components/MobileControls.tsx';
 import { PortoRealModal } from './components/PortoRealModal.tsx';
@@ -16,11 +20,17 @@ import type {
   HudSnapshot,
   InputState,
   LeaderboardEntry,
+  ProfessionId,
+  LifeAction,
+  LifeJobId,
+  LifeLocation,
 } from './game/types.ts';
+import { createInitialLifeSimulation } from './game/lifeSimulation.ts';
 import { WEAPON_ORDER } from './game/weapons.ts';
 
 const INITIAL_HUD: HudSnapshot = {
-  cash: 500,
+  cash: 650,
+  life: createInitialLifeSimulation(),
   hp: 100,
   maxHp: 100,
   armor: 40,
@@ -34,21 +44,34 @@ const INITIAL_HUD: HudSnapshot = {
   nearServiceZone: null,
   nearBuildingId: null,
   nearBuildingName: null,
-  missionTitle: 'Operação São Bento → Palácio da Bolsa',
-  missionObjective: 'Entre na Estação de São Bento para simular o acesso ao Átrio dos Azulejos.',
-  missionReward: 650,
-  missionBuilding: 'Estação de São Bento',
+  nearLifeLocation: null,
+  canInteractLifeLocation: false,
+  missionTitle: 'Explora o Porto e constrói a tua vida',
+  missionObjective: 'Escolhe como queres viver: trabalha, explora e conhece a cidade.',
+  missionReward: 0,
+  missionBuilding: 'Porto',
   missionProgress: 0,
   missionSimulating: false,
   gpsDistMeters: 0,
   headlightsOn: true,
+  sirenActive: false,
+  profession: 'merchant',
+  professionTitle: 'Empresário',
+  professionColor: '#A855F7',
+  onDuty: false,
+  drivingPoints: 12,
+  reputation: 10,
+  canInteractMission: false,
+  activeActivity: null,
+  nearPspTarget: null,
+  emergencyPings: [],
   storyChapter: 1,
   completedChapters: [],
   activeDialogue: null,
   comboMultiplier: 1,
   missionsCompleted: 0,
   maxStarsReached: 0,
-  timeOfDayLabel: 'Entardecer no Douro',
+  timeOfDayLabel: 'Manhã no Porto',
   cameraMode: 'chase',
   currentWeapon: 'pistol',
   unlockedWeapons: ['pistol'],
@@ -70,11 +93,22 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState>('TITLE_MENU');
   const gameStateRef = useRef<GameState>('TITLE_MENU');
   const [character, setCharacter] = useState<CharacterId>('lucia');
+  const [profession, setProfession] = useState<ProfessionId>('merchant');
+  const [careerOpen, setCareerOpen] = useState(false);
+  const [lifeOpen, setLifeOpen] = useState(false);
+  const [activeLifeLocation, setActiveLifeLocation] = useState<LifeLocation | null>(null);
+  const [interiorLocation, setInteriorLocation] = useState<LifeLocation | null>(null);
+  const interiorOpenRef = useRef(false);
+  interiorOpenRef.current = Boolean(interiorLocation);
+  const activeActivityRef = useRef(false);
+  const lifeOpenRef = useRef(false);
+  lifeOpenRef.current = lifeOpen;
   const [controlMode, setControlMode] = useState<ControlMode>('auto');
   const [playerCallsign, setPlayerCallsign] = useState('Piloto do Porto');
   const [roomCode, setRoomCode] = useState('porto-ribeira');
   const [isTouchViewport, setIsTouchViewport] = useState<boolean>(detectTouchDevice);
   const [hud, setHud] = useState<HudSnapshot>(INITIAL_HUD);
+  activeActivityRef.current = Boolean(hud.activeActivity);
   const [muted, setMuted] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
@@ -126,6 +160,7 @@ export default function App() {
   if (!engineRef.current) {
     engineRef.current = new LeonidaEngine(
       character,
+      profession,
       () => setGameState('GAME_OVER'),
       () => setGameState('GARAGE'),
     );
@@ -184,15 +219,20 @@ export default function App() {
       .then((data) => {
         if (Array.isArray(data?.entries)) setLeaderboard(data.entries);
       })
-      .catch(() => {});
+      .catch(() => {});7403
   }, []);
+
+  useEffect(() => {
+    const line = hud.ambientNpcDialogue;
+    if (gameState === 'PLAYING' && line) soundEngine.speakNpc(line.text, line.speaker);
+  }, [hud.ambientNpcDialogue?.text, hud.ambientNpcDialogue?.speaker, gameState]);
 
   useEffect(() => {
     const isTyping = (target: EventTarget | null) =>
       target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isTyping(e.target)) return;
+      if (isTyping(e.target) || interiorOpenRef.current) return;
 
       if (gameStateRef.current !== 'PLAYING') {
         if (
@@ -214,6 +254,22 @@ export default function App() {
       if (storyOpenRef.current) {
         if (e.key === 'Escape' || e.code === 'KeyM') {
           setStoryOpen(false);
+        }
+        return;
+      }
+
+      if (lifeOpenRef.current) {
+        if (e.key === 'Escape') {
+          setLifeOpen(false);
+          setActiveLifeLocation(null);
+        }
+        return;
+      }
+
+      if (activeActivityRef.current) {
+        if (e.key === 'Escape') {
+          engineRef.current?.cancelLandmarkActivity();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
         }
         return;
       }
@@ -242,6 +298,16 @@ export default function App() {
         if (snap?.activeDialogue) {
           e.preventDefault();
           engineRef.current?.advanceDialogue();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }
+      }
+      if (code === 'KeyG') {
+        const snap = engineRef.current?.getHudSnapshot();
+        if (snap?.canInteractLifeLocation && snap.nearLifeLocation) {
+          setActiveLifeLocation(snap.nearLifeLocation);
+          setLifeOpen(true);
+        } else if (snap?.canInteractMission) {
+          engineRef.current?.openLandmarkActivity();
           if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
         }
       }
@@ -299,10 +365,17 @@ export default function App() {
       const mp = mpRef.current;
       const remotePlayers = mp ? mp.remotePlayers : new Map();
 
+      if (gameStateRef.current === 'PLAYING' && interiorOpenRef.current) {
+        engine.advanceLifeClockWhileIndoors(dt);
+      }
+
       if (
         gameStateRef.current === 'PLAYING' &&
+        !interiorOpenRef.current &&
         !realExplorerOpenRef.current &&
-        !storyOpenRef.current
+        !storyOpenRef.current &&
+        !lifeOpenRef.current &&
+        !activeActivityRef.current
       ) {
         const aimWorld2D =
           !effectiveMobileRef.current && inputRef.current.mouseActive
@@ -338,7 +411,9 @@ export default function App() {
         }
       }
 
-      scene3d.updateAndRender(engine, remotePlayers, dt, engine.cameraMode);
+      if (!interiorOpenRef.current) {
+        scene3d.updateAndRender(engine, remotePlayers, dt, engine.cameraMode);
+      }
 
       hudTimer += dt;
       if (hudTimer >= 0.08) {
@@ -361,7 +436,7 @@ export default function App() {
   }, []);
 
   const handleStartGame = () => {
-    engineRef.current?.reset(character);
+    engineRef.current?.reset(character, profession);
     scene3dRef.current?.syncCharacterModel(character);
     mpRef.current?.connect(playerCallsign, roomCode, character);
     if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
@@ -413,6 +488,7 @@ export default function App() {
     <div className="relative w-screen h-[100dvh] overflow-hidden bg-[#090D16] select-none touch-none">
       <div
         ref={mountRef}
+        style={{ opacity: interiorLocation ? 0 : 1, pointerEvents: interiorLocation ? 'none' : 'auto' }}
         onContextMenu={(e) => e.preventDefault()}
         onMouseMove={(e) => {
           inputRef.current.mouseX = e.clientX;
@@ -485,7 +561,7 @@ export default function App() {
         className="w-full h-full cursor-crosshair"
       />
 
-      {gameState !== 'TITLE_MENU' && (
+      {gameState !== 'TITLE_MENU' && !interiorLocation && (
         <GameHud
           hud={hud}
           isMobile={effectiveMobile}
@@ -504,8 +580,25 @@ export default function App() {
             engineRef.current?.cycleCameraMode();
             if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
           }}
+          onOpenCareer={() => setCareerOpen(true)}
+          onOpenLife={(location) => {
+            setActiveLifeLocation(location);
+            setLifeOpen(true);
+          }}
           onOpenGarage={() => setGameState('GARAGE')}
           onOpenStory={() => setStoryOpen(true)}
+          onInteractMission={() => {
+            engineRef.current?.openLandmarkActivity();
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
+          onPspInspect={() => {
+            engineRef.current?.openPspInspection();
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
+          onCall112={() => {
+            engineRef.current?.callEmergency112();
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
           onOpenRealExplorer={(buildingId) => {
             setRealExplorerBuildingId(buildingId ?? hud.nearBuildingId ?? null);
             setRealExplorerOpen(true);
@@ -517,6 +610,24 @@ export default function App() {
             if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
           }}
           onSendChat={(txt) => mpRef.current?.sendChat(txt)}
+        />
+      )}
+
+      {gameState === 'PLAYING' && hud.activeActivity && !lifeOpen && !storyOpen && !realExplorerOpen && (
+        <ActivityModal
+          activity={hud.activeActivity}
+          onChooseOption={(index) => {
+            engineRef.current?.chooseNpcOption(index);
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
+          onComplete={(performanceMul, pspDecision) => {
+            engineRef.current?.completeLandmarkActivity(performanceMul, pspDecision);
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
+          onCancel={() => {
+            engineRef.current?.cancelLandmarkActivity();
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }}
         />
       )}
 
@@ -535,7 +646,7 @@ export default function App() {
         />
       )}
 
-      {gameState === 'PLAYING' && effectiveMobile && !realExplorerOpen && !storyOpen && (
+      {gameState === 'PLAYING' && effectiveMobile && !interiorLocation && !realExplorerOpen && !storyOpen && (
         <MobileControls
           inVehicle={Boolean(hud.vehicleName)}
           canEnterVehicle={Boolean(hud.nearVehicleName)}
@@ -573,6 +684,7 @@ export default function App() {
       <GameModals
         gameState={gameState}
         character={character}
+        profession={profession}
         controlMode={controlMode}
         effectiveMobile={effectiveMobile}
         playerCallsign={playerCallsign}
@@ -583,6 +695,7 @@ export default function App() {
         onChangeCallsign={setPlayerCallsign}
         onChangeRoomCode={setRoomCode}
         onSelectCharacter={setCharacter}
+        onSelectProfession={setProfession}
         onSelectControlMode={setControlMode}
         onStartGame={handleStartGame}
         onResume={() => setGameState('PLAYING')}
@@ -605,6 +718,71 @@ export default function App() {
         onSaveScore={handleSaveScore}
       />
 
+      <CareerModal
+        open={careerOpen}
+        hud={hud}
+        onClose={() => setCareerOpen(false)}
+        onSelectProfession={(nextProfession) => {
+          setProfession(nextProfession);
+          engineRef.current?.setProfession(nextProfession);
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onToggleDuty={() => {
+          engineRef.current?.toggleDuty();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onSpawnServiceVehicle={() => {
+          engineRef.current?.spawnProfessionVehicle();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onCall112={() => {
+          engineRef.current?.callEmergency112();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+      />
+
+      <LifeSimulationModal
+        open={lifeOpen}
+        life={hud.life}
+        cash={hud.cash}
+        location={activeLifeLocation}
+        onEnterInterior={() => {
+          if (!activeLifeLocation) return;
+          setLifeOpen(false);
+          setInteriorLocation(activeLifeLocation);
+          setActiveLifeLocation(null);
+        }}
+        onTalkToNpc={() => {
+          const location = activeLifeLocation;
+          setLifeOpen(false);
+          setActiveLifeLocation(null);
+          if (location) {
+            engineRef.current?.openLifeLocationConversation(location.id);
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+          }
+        }}
+        onClose={() => {
+          setLifeOpen(false);
+          setActiveLifeLocation(null);
+        }}
+        onAction={(action: LifeAction) => {
+          engineRef.current?.performLifeAction(action, activeLifeLocation?.kind ?? null);
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onSelectJob={(job: LifeJobId) => {
+          engineRef.current?.setLifeJob(job);
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onAcceptContract={(contractId) => {
+          engineRef.current?.acceptLifeContract(contractId);
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+        onCancelContract={() => {
+          engineRef.current?.cancelLifeContract();
+          if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+        }}
+      />
+
       <PortoRealModal
         open={realExplorerOpen}
         initialBuildingId={realExplorerBuildingId}
@@ -625,6 +803,24 @@ export default function App() {
           if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
         }}
       />
+
+      {interiorLocation && gameState === 'PLAYING' && (
+        <InteriorScene
+          location={interiorLocation}
+          character={character}
+          job={hud.life.job}
+          isMobile={effectiveMobile}
+          minuteOfDay={hud.life.minuteOfDay}
+          completedTaskIds={hud.life.completedInteriorTasks ?? []}
+          onClose={() => setInteriorLocation(null)}
+          onCompleteTask={(taskId) => {
+            const result = engineRef.current?.completeInteriorTask(interiorLocation.kind, taskId)
+              ?? { ok: false, message: 'O motor do jogo não está disponível.' };
+            if (engineRef.current) setHud(engineRef.current.getHudSnapshot());
+            return result;
+          }}
+        />
+      )}
     </div>
   );
 }

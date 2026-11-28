@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import {
   createBuildingFacadeTextures,
   createLandmarkSignTexture,
@@ -9,9 +11,13 @@ import type { Building, CharacterId, Pickup, VehicleType, WeaponId } from './typ
 
 export const WORLD_SCALE = 0.1;
 
+export type VehicleColorMaterial = THREE.Material & { color: THREE.Color };
+
 export interface VehicleRig {
   group: THREE.Group;
-  paintMat: THREE.MeshPhysicalMaterial;
+  paintMat: VehicleColorMaterial;
+  paintMaterials?: VehicleColorMaterial[];
+  wheelAxis?: 'x' | 'z';
   taillightMat: THREE.MeshStandardMaterial;
   headlightMat: THREE.MeshStandardMaterial;
   wheelRollers: THREE.Object3D[];
@@ -384,7 +390,7 @@ export function createVehicleRig(
   const headlightMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     emissive: 0xfef3c7,
-    emissiveIntensity: 1.5,
+    emissiveIntensity: 0.85,
     roughness: 0.15,
   });
   const hlGeo = new THREE.BoxGeometry(0.1, 0.15, 0.36);
@@ -410,7 +416,7 @@ export function createVehicleRig(
   const taillightMat = new THREE.MeshStandardMaterial({
     color: 0xef4444,
     emissive: 0xef4444,
-    emissiveIntensity: 1.2,
+    emissiveIntensity: 0.78,
     roughness: 0.2,
   });
   const tlGeo = new THREE.BoxGeometry(0.09, 0.14, 0.4);
@@ -422,11 +428,12 @@ export function createVehicleRig(
 
   const wheelRollers: THREE.Object3D[] = [];
   const frontSteerPivots: THREE.Object3D[] = [];
-  const tireGeo = new THREE.CylinderGeometry(wheelR, wheelR, wheelW, 18);
+  const tireGeo = new THREE.CylinderGeometry(wheelR, wheelR, wheelW, 32);
   tireGeo.rotateX(Math.PI / 2);
-  const rotorGeo = new THREE.CylinderGeometry(wheelR * 0.64, wheelR * 0.64, wheelW * 0.5, 12);
+  const rotorGeo = new THREE.CylinderGeometry(wheelR * 0.64, wheelR * 0.64, wheelW * 0.5, 24);
   rotorGeo.rotateX(Math.PI / 2);
-  const spokeGeo = new THREE.BoxGeometry(wheelR * 1.12, 0.07, wheelW + 0.03);
+  const spokeGeo = new THREE.BoxGeometry(wheelR * 1.12, 0.055, wheelW + 0.03);
+  const rimRingGeo = new THREE.TorusGeometry(wheelR * 0.68, 0.045, 8, 28);
 
   const wheelPositions: [number, number, boolean][] = [
     [len * 0.31, -wid * 0.5 + wheelW * 0.15, true],
@@ -448,7 +455,12 @@ export function createVehicleRig(
     spokeB.rotation.z = Math.PI * 0.4;
     const spokeC = new THREE.Mesh(spokeGeo, SHARED_RIM_MAT);
     spokeC.rotation.z = -Math.PI * 0.4;
-    wheelGroup.add(tire, rotor, spokeA, spokeB, spokeC);
+    const spokeD = new THREE.Mesh(spokeGeo, SHARED_RIM_MAT);
+    spokeD.rotation.z = Math.PI * 0.8;
+    const spokeE = new THREE.Mesh(spokeGeo, SHARED_RIM_MAT);
+    spokeE.rotation.z = -Math.PI * 0.8;
+    const rimRing = new THREE.Mesh(rimRingGeo, SHARED_RIM_MAT);
+    wheelGroup.add(tire, rotor, rimRing, spokeA, spokeB, spokeC, spokeD, spokeE);
 
     steerPivot.add(wheelGroup);
     group.add(steerPivot);
@@ -470,12 +482,12 @@ export function createVehicleRig(
     sirenRed = new THREE.MeshStandardMaterial({
       color: 0xef4444,
       emissive: 0xef4444,
-      emissiveIntensity: 2.0,
+      emissiveIntensity: 1.15,
     });
     sirenBlue = new THREE.MeshStandardMaterial({
       color: 0x3b82f6,
       emissive: 0x3b82f6,
-      emissiveIntensity: 2.0,
+      emissiveIntensity: 1.15,
     });
 
     const redPod = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.12, 0.52), sirenRed);
@@ -491,14 +503,14 @@ export function createVehicleRig(
     const signMat = new THREE.MeshStandardMaterial({
       color: 0x6ee7b7,
       emissive: 0x10b981,
-      emissiveIntensity: 1.4,
+      emissiveIntensity: 0.8,
     });
     const sign = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.22, 0.74), signMat);
     sign.position.set(-0.2, bodyBaseY + 1.24, 0);
     group.add(sign);
   }
 
-  return {
+  const rig: VehicleRig = {
     group,
     paintMat,
     taillightMat,
@@ -509,7 +521,129 @@ export function createVehicleRig(
     sirenBlue,
     sirenLight,
     headlightBeam,
+    wheelAxis: 'z',
   };
+
+  void loadRealisticVehicleModel(rig, type, colorHex);
+  return rig;
+}
+
+const VEHICLE_ASSET_FILES: Record<VehicleType, string> = {
+  coupe: 'rear-engine-sports-coupe.glb',
+  muscle: 'muscle-coupe.glb',
+  buggy: 'boxy-off-roader.glb',
+  police: 'sport-sedan.glb',
+  taxi: 'retro-city-car.glb',
+};
+
+const vehicleAssetLoader = new GLTFLoader();
+const vehicleAssetCache = new Map<string, Promise<THREE.Group>>();
+
+function getVehicleAssetTemplate(fileName: string): Promise<THREE.Group> {
+  const cached = vehicleAssetCache.get(fileName);
+  if (cached) return cached;
+
+  const promise = vehicleAssetLoader
+    .loadAsync(`/models/cars/${fileName}`)
+    .then((gltf) => gltf.scene);
+  vehicleAssetCache.set(fileName, promise);
+  return promise;
+}
+
+async function loadRealisticVehicleModel(
+  rig: VehicleRig,
+  type: VehicleType,
+  colorHex: string,
+) {
+  const fileName = VEHICLE_ASSET_FILES[type];
+  try {
+    const template = await getVehicleAssetTemplate(fileName);
+    if (!rig.group.parent) return;
+
+    const model = template.clone(true);
+    model.rotation.y = Math.PI / 2;
+    const paintMaterials: VehicleColorMaterial[] = [];
+
+    model.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = true;
+
+      const cloneMaterial = (source: THREE.Material): THREE.Material => {
+        const material = source.clone();
+        if (material.name.toLowerCase().startsWith('paint') && 'color' in material) {
+          const colorMaterial = material as VehicleColorMaterial;
+          colorMaterial.color.set(colorHex);
+          paintMaterials.push(colorMaterial);
+        }
+        return material;
+      };
+
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map(cloneMaterial)
+        : cloneMaterial(mesh.material);
+    });
+
+    // Vinish GLB cars use separate, named wheels so steering and rotation remain functional.
+    const wheelNames = ['Wheel_FL', 'Wheel_FR', 'Wheel_RL', 'Wheel_RR'];
+    const wheels = wheelNames
+      .map((name) => model.getObjectByName(name))
+      .filter((wheel): wheel is THREE.Object3D => Boolean(wheel));
+    rig.group.clear();
+    rig.group.add(model);
+
+    if (wheels.length === 4) {
+      wheels.forEach((wheel) => wheel.rotation.reorder('YXZ'));
+      rig.wheelRollers = wheels;
+      rig.frontSteerPivots = wheels.slice(0, 2);
+      rig.wheelAxis = 'x';
+    }
+
+    if (paintMaterials.length > 0) {
+      rig.paintMaterials = paintMaterials;
+      rig.paintMat = paintMaterials[0];
+    }
+
+    rig.headlightBeam = undefined;
+
+    if (type === 'police' && rig.sirenRed && rig.sirenBlue) {
+      const lightBarBase = new THREE.Mesh(
+        new THREE.BoxGeometry(1.05, 0.09, 0.25),
+        new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.52, metalness: 0.35 }),
+      );
+      lightBarBase.position.set(0, 1.55, 0);
+      const redPod = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.13, 0.23), rig.sirenRed);
+      redPod.position.set(-0.28, 1.66, 0);
+      const bluePod = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.13, 0.23), rig.sirenBlue);
+      bluePod.position.set(0.28, 1.66, 0);
+      model.add(lightBarBase, redPod, bluePod);
+      if (rig.sirenLight) {
+        rig.sirenLight.position.set(0, 2.0, 0);
+        model.add(rig.sirenLight);
+      }
+    }
+
+    if (type === 'taxi') {
+      const taxiSignMaterial = new THREE.MeshStandardMaterial({
+        color: 0x6ee7b7,
+        emissive: 0x10b981,
+        emissiveIntensity: 0.8,
+        roughness: 0.25,
+      });
+      const taxiSign = new THREE.Mesh(
+        new THREE.BoxGeometry(0.58, 0.16, 0.28),
+        taxiSignMaterial,
+      );
+      taxiSign.position.set(0, 1.62, 0);
+      model.add(taxiSign);
+    }
+
+    console.info('[PORTUGAL LIFE] Veículo realista carregado:', fileName);
+  } catch (error) {
+    console.warn(`[PORTUGAL LIFE] Não foi possível carregar ${fileName}; a usar o veículo de reserva.`, error);
+  }
 }
 
 export function createCharacterRig(
@@ -583,7 +717,7 @@ export function createCharacterRig(
   shadow.position.y = 0.03;
   group.add(shadow);
 
-  const pelvis = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.14, 6, 10), pantsMat);
+  const pelvis = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.14, 10, 16), pantsMat);
   pelvis.rotation.x = Math.PI / 2;
   pelvis.position.set(0, 0.9, 0);
   bodyRoot.add(pelvis);
@@ -594,7 +728,7 @@ export function createCharacterRig(
   bodyRoot.add(belt);
 
   const chest = new THREE.Mesh(
-    new THREE.CapsuleGeometry(isLucia ? 0.175 : 0.2, 0.34, 8, 12),
+    new THREE.CapsuleGeometry(isLucia ? 0.175 : 0.2, 0.34, 12, 18),
     jacketMat,
   );
   chest.scale.set(0.72, 1, isLucia ? 1.04 : 1.16);
@@ -610,12 +744,12 @@ export function createCharacterRig(
   headGroup.position.set(0, 1.68, 0);
   bodyRoot.add(headGroup);
 
-  const cranium = new THREE.Mesh(new THREE.SphereGeometry(0.145, 16, 14), skinMat);
+  const cranium = new THREE.Mesh(new THREE.SphereGeometry(0.145, 24, 18), skinMat);
   cranium.scale.set(0.95, 1.12, 0.88);
   cranium.castShadow = enableShadows;
   headGroup.add(cranium);
 
-  const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), skinMat);
+  const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.1, 18, 14), skinMat);
   jaw.scale.set(0.92, 0.85, 0.78);
   jaw.position.set(0.03, -0.065, 0);
   headGroup.add(jaw);
@@ -625,7 +759,7 @@ export function createCharacterRig(
   nose.position.set(0.145, -0.01, 0);
   headGroup.add(nose);
 
-  const hairCrown = new THREE.Mesh(new THREE.SphereGeometry(0.152, 14, 12), hairMat);
+  const hairCrown = new THREE.Mesh(new THREE.SphereGeometry(0.152, 22, 16), hairMat);
   hairCrown.scale.set(0.98, 0.95, 0.92);
   hairCrown.position.set(-0.02, 0.045, 0);
   headGroup.add(hairCrown);
@@ -641,9 +775,9 @@ export function createCharacterRig(
   shades.position.set(0.125, 0.025, 0);
   headGroup.add(shades);
 
-  const thighGeo = new THREE.CapsuleGeometry(0.078, 0.28, 6, 10);
+  const thighGeo = new THREE.CapsuleGeometry(0.078, 0.28, 10, 14);
   thighGeo.translate(0, -0.2, 0);
-  const calfGeo = new THREE.CapsuleGeometry(0.064, 0.28, 6, 10);
+  const calfGeo = new THREE.CapsuleGeometry(0.064, 0.28, 10, 14);
   calfGeo.translate(0, -0.2, 0);
   const shoeGeo = new THREE.BoxGeometry(0.22, 0.09, 0.12);
   shoeGeo.translate(0.04, -0.42, 0);
@@ -669,9 +803,9 @@ export function createCharacterRig(
   const leftLeg = makeLeg(-0.12);
   const rightLeg = makeLeg(0.12);
 
-  const upperArmGeo = new THREE.CapsuleGeometry(0.056, 0.2, 6, 8);
+  const upperArmGeo = new THREE.CapsuleGeometry(0.056, 0.2, 10, 12);
   upperArmGeo.translate(0, -0.14, 0);
-  const foreArmGeo = new THREE.CapsuleGeometry(0.046, 0.19, 6, 8);
+  const foreArmGeo = new THREE.CapsuleGeometry(0.046, 0.19, 10, 12);
   foreArmGeo.translate(0, -0.13, 0);
   const handGeo = new THREE.SphereGeometry(0.05, 8, 8);
 
@@ -845,7 +979,7 @@ export function createBuildingRig(
     map,
     emissiveMap,
     emissive: new THREE.Color('#ffffff'),
-    emissiveIntensity: 0.55,
+    emissiveIntensity: 0.16,
     roughnessMap,
     roughness: 0.72,
     metalness: 0.12,
@@ -861,13 +995,25 @@ export function createBuildingRig(
   const warmLobbyMat = new THREE.MeshStandardMaterial({
     color: 0xfef3c7,
     emissive: 0xfbbf24,
-    emissiveIntensity: 1.35,
+    emissiveIntensity: 0.55,
     roughness: 0.25,
   });
   const windowGlowMats: THREE.MeshStandardMaterial[] = [warmLobbyMat];
 
   const makeBox = (bw: number, bh: number, bd: number, mat: THREE.Material, x = 0, y = 0, z = 0) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), mat);
+    const isArchitecturalMass =
+      bw >= 5 && bh >= 6 && bd >= 5 &&
+      (mat === facadeMat || mat === SHARED_GRANITE_MAT || mat === SHARED_WHITE_STONE_MAT);
+    const geometry = isArchitecturalMass
+      ? new RoundedBoxGeometry(
+          bw,
+          bh,
+          bd,
+          2,
+          Math.min(0.24, Math.min(bw, bh, bd) * 0.018),
+        )
+      : new THREE.BoxGeometry(bw, bh, bd);
+    const m = new THREE.Mesh(geometry, mat);
     m.position.set(x, y, z);
     m.castShadow = enableShadows;
     m.receiveShadow = enableShadows;
@@ -1017,7 +1163,7 @@ export function createBuildingRig(
     const crimsonMat = new THREE.MeshStandardMaterial({
       color: 0xe11d48,
       emissive: 0xfb7185,
-      emissiveIntensity: 1.4,
+      emissiveIntensity: 0.7,
     });
     windowGlowMats.push(crimsonMat);
     makeBox(8.5, 6.2, 1.4, crimsonMat, 0, 3.4, -d * 0.44);
@@ -1121,7 +1267,7 @@ export function createBuildingRig(
     const neonMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(b.accentColor),
       emissive: new THREE.Color(b.accentColor),
-      emissiveIntensity: 1.5,
+      emissiveIntensity: 0.75,
     });
     windowGlowMats.push(neonMat);
     makeBox(1.2, 1.8, d * 0.56, neonMat, -w * 0.46, 8.2, 0);
@@ -1143,7 +1289,198 @@ export function createBuildingRig(
     group.add(cup);
   }
 
-  // Azulejo Portuguese monument plaque on entrance facade
+  // Detailed street facades: recessed glazing, stone frames, wrought-iron balconies and cornices.
+  const windowGlassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x263746,
+    roughness: 0.2,
+    metalness: 0.18,
+    clearcoat: 0.55,
+    clearcoatRoughness: 0.16,
+  });
+  const windowFrameMat = new THREE.MeshStandardMaterial({
+    color: b.facadeStyle === 'ochre' ? 0xcbb89d : 0xb9b2a5,
+    roughness: 0.78,
+    metalness: 0.04,
+  });
+  const balconyMetalMat = new THREE.MeshStandardMaterial({
+    color: 0x20262b,
+    roughness: 0.48,
+    metalness: 0.72,
+  });
+  const balconyStoneMat = new THREE.MeshStandardMaterial({
+    color: 0x8c877f,
+    roughness: 0.9,
+    metalness: 0.02,
+  });
+
+  const paneWidth = 0.96;
+  const paneHeight = 1.38;
+  const paneGeometry = new THREE.BoxGeometry(paneWidth, paneHeight, 0.1);
+  const frameHorizontalGeometry = new THREE.BoxGeometry(paneWidth + 0.2, 0.09, 0.18);
+  const frameVerticalGeometry = new THREE.BoxGeometry(0.09, paneHeight + 0.16, 0.18);
+  const sillGeometry = new THREE.BoxGeometry(paneWidth + 0.28, 0.13, 0.34);
+  const balconySlabGeometry = new THREE.BoxGeometry(paneWidth + 0.52, 0.12, 0.72);
+  const balconyRailGeometry = new THREE.BoxGeometry(paneWidth + 0.52, 0.07, 0.07);
+  const balconyPostGeometry = new THREE.BoxGeometry(0.07, 0.58, 0.07);
+
+  const paneInstances: THREE.Object3D[] = [];
+  const horizontalFrameInstances: THREE.Object3D[] = [];
+  const verticalFrameInstances: THREE.Object3D[] = [];
+  const sillInstances: THREE.Object3D[] = [];
+  const balconySlabInstances: THREE.Object3D[] = [];
+  const balconyRailInstances: THREE.Object3D[] = [];
+  const balconyPostInstances: THREE.Object3D[] = [];
+
+  const addInstancePose = (
+    target: THREE.Object3D[],
+    x: number,
+    y: number,
+    z: number,
+    rotationY: number,
+  ) => {
+    const pose = new THREE.Object3D();
+    pose.position.set(x, y, z);
+    pose.rotation.y = rotationY;
+    pose.updateMatrix();
+    target.push(pose);
+  };
+
+  const windowRows = Math.min(5, Math.max(2, b.floors - 1));
+  const addWindowFace = (
+    axis: 'x' | 'z',
+    sign: number,
+    faceLength: number,
+    faceDepth: number,
+    isFront: boolean,
+  ) => {
+    const columns = Math.max(2, Math.min(7, Math.floor(faceLength / 5.2)));
+    const spacing = faceLength / (columns + 1);
+    const rotationY = axis === 'x' ? Math.PI / 2 : 0;
+    const surfaceOffset = faceDepth * 0.5 + 0.12;
+
+    for (let row = 0; row < windowRows; row += 1) {
+      const windowY = 2.35 + row * 2.7;
+      if (windowY + paneHeight * 0.5 > Math.min(18.5, b.floors * 2.8)) continue;
+
+      for (let column = 0; column < columns; column += 1) {
+        const along = -faceLength * 0.5 + spacing * (column + 1);
+        const x = axis === 'z' ? along : sign * surfaceOffset;
+        const z = axis === 'z' ? sign * surfaceOffset : along;
+
+        addInstancePose(paneInstances, x, windowY, z, rotationY);
+        addInstancePose(horizontalFrameInstances, x, windowY - paneHeight * 0.5, z, rotationY);
+        addInstancePose(horizontalFrameInstances, x, windowY + paneHeight * 0.5, z, rotationY);
+        addInstancePose(verticalFrameInstances, x - Math.cos(rotationY) * (paneWidth * 0.5), windowY, z + Math.sin(rotationY) * (paneWidth * 0.5), rotationY);
+        addInstancePose(verticalFrameInstances, x + Math.cos(rotationY) * (paneWidth * 0.5), windowY, z - Math.sin(rotationY) * (paneWidth * 0.5), rotationY);
+        addInstancePose(sillInstances, x, windowY - paneHeight * 0.5 - 0.12, z, rotationY);
+
+        // A small number of windows become proper Juliet balconies on the public-facing facade.
+        if (isFront && row > 0 && column % 2 === 0 && b.facadeStyle !== 'white_concrete') {
+          const outward = sign * 0.34;
+          const balconyX = axis === 'z' ? x : x + outward;
+          const balconyZ = axis === 'z' ? z + outward : z;
+          const railX = axis === 'z' ? x : x + sign * 0.72;
+          const railZ = axis === 'z' ? z + sign * 0.72 : z;
+          addInstancePose(balconySlabInstances, balconyX, windowY - 0.82, balconyZ, rotationY);
+          addInstancePose(balconyRailInstances, railX, windowY - 0.48, railZ, rotationY);
+
+          const postOffset = (paneWidth + 0.44) * 0.5;
+          const post1X = axis === 'z' ? x - postOffset : x + sign * 0.72;
+          const post1Z = axis === 'z' ? z + sign * 0.72 : z - postOffset;
+          const post2X = axis === 'z' ? x + postOffset : x + sign * 0.72;
+          const post2Z = axis === 'z' ? z + sign * 0.72 : z + postOffset;
+          addInstancePose(balconyPostInstances, post1X, windowY - 0.77, post1Z, rotationY);
+          addInstancePose(balconyPostInstances, post2X, windowY - 0.77, post2Z, rotationY);
+        }
+      }
+    }
+  };
+
+  const frontAxis: 'x' | 'z' = Math.abs(dxEnt) > Math.abs(dzEnt) ? 'x' : 'z';
+  const frontSign = frontAxis === 'x' ? (dxEnt > 0 ? 1 : -1) : (dzEnt > 0 ? 1 : -1);
+  addWindowFace('z', -1, w * 0.9, d, frontAxis === 'z' && frontSign === -1);
+  addWindowFace('z', 1, w * 0.9, d, frontAxis === 'z' && frontSign === 1);
+  addWindowFace('x', -1, d * 0.84, w, frontAxis === 'x' && frontSign === -1);
+  addWindowFace('x', 1, d * 0.84, w, frontAxis === 'x' && frontSign === 1);
+
+  const addInstancedDetails = (
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    poses: THREE.Object3D[],
+  ) => {
+    if (poses.length === 0) return;
+    const instances = new THREE.InstancedMesh(geometry, material, poses.length);
+    poses.forEach((pose, index) => instances.setMatrixAt(index, pose.matrix));
+    instances.instanceMatrix.needsUpdate = true;
+    instances.computeBoundingSphere();
+    instances.castShadow = enableShadows;
+    instances.receiveShadow = enableShadows;
+    group.add(instances);
+  };
+
+  addInstancedDetails(paneGeometry, windowGlassMat, paneInstances);
+  addInstancedDetails(frameHorizontalGeometry, windowFrameMat, horizontalFrameInstances);
+  addInstancedDetails(frameVerticalGeometry, windowFrameMat, verticalFrameInstances);
+  addInstancedDetails(sillGeometry, windowFrameMat, sillInstances);
+  addInstancedDetails(balconySlabGeometry, balconyStoneMat, balconySlabInstances);
+  addInstancedDetails(balconyRailGeometry, balconyMetalMat, balconyRailInstances);
+  addInstancedDetails(balconyPostGeometry, balconyMetalMat, balconyPostInstances);
+
+  // Continuous stone cornice breaks up the single-box silhouette and casts a fine shadow.
+  const corniceY =
+    kind === 'clerigos' ? 13.9 :
+    kind === 'serra_pilar' ? 10.1 :
+    Math.min(19.2, b.floors * 2.8) + 0.28;
+  const corniceMaterial = SHARED_WHITE_STONE_MAT;
+  const corniceFront = new THREE.Mesh(new THREE.BoxGeometry(w + 0.9, 0.28, 0.32), corniceMaterial);
+  corniceFront.position.set(0, corniceY, d * 0.5 + 0.02);
+  const corniceBack = corniceFront.clone();
+  corniceBack.position.z = -d * 0.5 - 0.02;
+  const corniceSide = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.28, d + 0.9), corniceMaterial);
+  corniceSide.position.set(w * 0.5 + 0.02, corniceY, 0);
+  const corniceOtherSide = corniceSide.clone();
+  corniceOtherSide.position.x = -w * 0.5 - 0.02;
+  group.add(corniceFront, corniceBack, corniceSide, corniceOtherSide);
+  corniceFront.castShadow = corniceBack.castShadow = corniceSide.castShadow = corniceOtherSide.castShadow = enableShadows;
+
+  // Terracotta chimney stacks and rooftop service details follow each landmark's roof height.
+  const roofLevels: Partial<Record<typeof kind, number>> = {
+    camara: 18.2,
+    saobento: 19.4,
+    lello: 18.7,
+    bolhao: 10.8,
+    ribeira: 19.2,
+    caves_gaia: 13.2,
+  };
+  if (roofLevels[kind] !== undefined) {
+    const chimneyGeometry = new THREE.BoxGeometry(0.72, 1.5, 0.72);
+    const chimneyCapGeometry = new THREE.BoxGeometry(0.92, 0.16, 0.92);
+    const chimneyMat = new THREE.MeshStandardMaterial({
+      color: 0x9a4930,
+      roughness: 0.88,
+      metalness: 0.02,
+    });
+    const roofLevel = roofLevels[kind] ?? corniceY;
+    for (let chimney = 0; chimney < 2; chimney += 1) {
+      const x = chimney === 0 ? -w * 0.28 : w * 0.3;
+      const base = roofLevel + 0.18;
+      const stack = new THREE.Mesh(chimneyGeometry, chimneyMat);
+      stack.position.set(x, base + 0.75, -d * 0.16);
+      const cap = new THREE.Mesh(chimneyCapGeometry, chimneyMat);
+      cap.position.set(x, base + 1.55, -d * 0.16);
+      stack.castShadow = cap.castShadow = enableShadows;
+      group.add(stack, cap);
+    }
+    const roofHatch = new THREE.Mesh(
+      new THREE.BoxGeometry(Math.max(1.2, w * 0.16), 0.82, Math.max(1.0, d * 0.14)),
+      SHARED_SLATE_MAT,
+    );
+    roofHatch.position.set(w * 0.12, roofLevel + 0.42, d * 0.18);
+    roofHatch.castShadow = enableShadows;
+    group.add(roofHatch);
+  }
+
+    // Azulejo Portuguese monument plaque on entrance facade
   addAzulejoPlaque(group, b.label, b.district, plaqueX, 6.8, plaqueZ, plaqueRot);
 
   return { group, facadeMat, windowGlowMats };
@@ -1217,7 +1554,7 @@ export function createDomLuisBridgeMesh(spanMeters: number, enableShadows: boole
   const lampMat = new THREE.MeshStandardMaterial({
     color: 0xfef3c7,
     emissive: 0xfbbf24,
-    emissiveIntensity: 1.8,
+    emissiveIntensity: 0.9,
   });
   for (let lx = -halfSpan + 6; lx <= halfSpan - 6; lx += 8) {
     for (const lz of [-6.2, 6.2]) {
